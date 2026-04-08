@@ -1,0 +1,26 @@
+
+> temp_app@0.1.0 build
+> next build
+
+??Next.js 16.2.2 (Turbopack)
+
+  Creating an optimized production build ...
+??Compiled successfully in 2.2s
+  Running TypeScript ...
+Failed to type check.
+
+./src/lib/agents/printCommander.ts:42:28
+Type error: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'BlobPart'.
+  Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'ArrayBufferView<ArrayBuffer>'.
+    Types of property 'buffer' are incompatible.
+      Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.
+        Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength
+
+  40 |    */
+  41 |   static triggerPrintPopup(pdfBytes: Uint8Array, filename: string = 'output.pdf') {
+> 42 |     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+     |                            ^
+  43 |     const blobUrl = URL.createObjectURL(blob);
+  44 |     
+  45 |     // iframe???덈뱺?쇰줈 留뚮뱾?댁꽌 異쒕젰 ?앹뾽???꾩슦??諛⑹떇 怨좊젮
+Next.js build worker exited with code: 1 and signal: null
