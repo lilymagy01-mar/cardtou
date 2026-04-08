@@ -1,8 +1,10 @@
-# 🌷 Florasync 출력 앱 아키텍처 Q&A
+# 🌷 CardToYou 에디터 아키텍처 Q&A
 
-이 문서는 메시지 카드 & 패널 출력 서비스 개발과 관련하여, 초기 설계 단계에서의 주요 기술적 질문과 답변을 정리한 내용입니다.
+이 문서는 메시지 카드 & 패널 출력 서비스 개발과 관련하여, 초기 설계 단계에서의 주요 기술적 질문과 답변, 그리고 에디터 기능 고도화 작업 내역을 정리한 내용입니다.
 
 ---
+
+## 📌 Part 1: 초기 설계 Q&A
 
 ### Q1. 개발 환경으로 깃허브(GitHub) + 수파베이스(Supabase) + 버셀(Vercel) 조합 정도면 충분할까요?
 **A. 네, 충분하고도 넘칩니다!** 
@@ -43,3 +45,267 @@
 1. **벡터(Vector) 방식:** JPG 사진 위에 글씨를 올리고 출력하면 모서리가 픽셀로 깨져 흐릿해집니다. PDF는 글자를 화소가 아닌 '수학적 뼈대(벡터)'로 보존하기 때문에 명품 카드처럼 가장자리가 칼같이 또렷하게 출력됩니다.
 2. **절대적인 물리적 규격 보장:** 브라우저에서 인쇄를 누르면 OS가 자기 마음대로 여백을 넣고 그림을 구겨버립니다. PDF로 전달해야만 "각도기" 에이전트가 계산한 **'1mm 오차 없는 접는 선'과 'A4/B5 규격'**이 인쇄기에 똑같이 적용됩니다.
 3. **색감 보정:** 인쇄소의 잉크 색상 규격과 모니터 규격은 다릅니다. 이 간극을 잡아주어 칙칙함을 없애려면 인쇄 친화적(Print-ready)인 PDF 프로필 스펙을 거쳐야 합니다.
+
+---
+---
+
+## 📌 Part 2: 에디터 기능 고도화 (2026-04-08)
+
+이번 세션에서는 카드 에디터의 사용성, 레이아웃, 텍스트 렌더링, 그리고 요소 삭제 UX를 대폭 개선했습니다.
+
+---
+
+### 🏗️ 프로젝트 구조
+
+```
+cardtou/
+├── src/
+│   ├── app/
+│   │   └── page.tsx                    # 메인 페이지 (사이드바 + 에디터)
+│   ├── components/
+│   │   └── editor/
+│   │       ├── EditorCanvas.tsx         # 캔버스 (DnD, 컨텍스트 메뉴)
+│   │       ├── DraggableText.tsx        # 드래그 가능한 텍스트 블록
+│   │       └── DraggableImage.tsx       # 드래그 가능한 이미지 블록
+│   ├── store/
+│   │   └── useEditorStore.ts           # Zustand 전역 상태 관리
+│   └── lib/
+│       ├── agents/                     # AI 에이전트 시스템
+│       │   ├── aiConnector.ts
+│       │   └── typographyWizard.ts
+│       └── constants/
+│           └── ContentSuggestions.ts
+├── docs/
+│   ├── QnA_architecture.md             # 이 문서
+│   └── development_plan.md             # 개발 계획서
+└── .agents/
+    └── skills/                         # 전문가 에이전트 스킬
+        ├── layout-architect/           # 각도기 (인쇄 규격 계산)
+        ├── print-commander/            # 프린트박 (출력물 생성)
+        ├── template-curator/           # 샘플리 (디자인 소스 관리)
+        └── typography-wizard/          # 폰트김 (폰트 렌더링)
+```
+
+---
+
+### 📐 데이터 모델 (Zustand Store)
+
+#### TextBlock 인터페이스
+```typescript
+interface TextBlock {
+  id: string;
+  text: string;
+  x: number;           // mm 단위 X 좌표
+  y: number;           // mm 단위 Y 좌표
+  fontSize: number;    // mm 단위 폰트 크기
+  colorHex: string;
+  fontFamily?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  zIndex?: number;
+  opacity?: number;
+  isLocked?: boolean;
+  width?: number;       // 가로 너비 (mm)
+  lineHeight?: number;  // 줄 간격 (기본 1.0)
+  rotation?: number;    // 회전 (도)
+}
+```
+
+#### ImageBlock 인터페이스
+```typescript
+interface ImageBlock {
+  id: string;
+  url: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isPrintable: boolean;
+  zIndex?: number;
+  rotation?: number;
+}
+```
+
+#### ShopSettings 인터페이스
+```typescript
+interface ShopSettings {
+  name: string;     // 가게명
+  tel: string;      // 전화번호
+  address: string;  // 주소
+  sns: string;      // SNS 계정
+  logoUrl: string | null;
+}
+```
+
+---
+
+### 🎯 주요 작업 내역
+
+#### 1. 표지 로고 & 샵 정보 배치 기능
+- **샵 브랜딩 설정 팝업**: 가게 정보(이름, 전화, 주소, SNS, 로고)를 별도 팝업에서 관리
+- **자동 배치**: "자동 배치" 버튼 클릭 시 표지에 로고 + 샵 정보 텍스트 블록을 자동 생성
+- **파일**: `page.tsx` — `isShopSettingsOpen` 상태로 팝업 제어, `applyShopBranding()` 호출
+
+#### 2. 캔버스 작업 영역 고정 (Sticky)
+- 사이드바 메뉴가 길어져도 캔버스가 항상 화면에 보이도록 `position: sticky` 적용
+- `top: 48px` (헤더 높이)에 고정, 메뉴만 스크롤됨
+
+#### 3. 텍스트 편집 안정화
+- **문제**: 줄바꿈 시 `TypographyWizard.getOptimalFontSize()`가 폰트를 12px로 강제 리셋
+- **해결**: 수동 편집 시 자동 사이즈 조절 로직 비활성화, 사용자 설정 폰트 크기 유지
+- **파일**: `page.tsx` textarea `onChange` 핸들러 수정
+
+#### 4. 줄간격(Line Height) 제어 슬라이더
+- 요소 속성 제어 섹션에 줄간격 슬라이더 추가 (범위: 0.8 ~ 3.0)
+- `TextBlock.lineHeight` 속성 → `DraggableText` 컴포넌트의 `style.lineHeight`에 자동 반영
+- 실시간 미리보기 지원
+
+#### 5. ⭐ 요소 삭제 UX 대폭 개선
+
+기존에는 요소 선택 후 작은 **X 버튼**을 찾아 클릭해야만 삭제가 가능했습니다.  
+이번 개선으로 **3가지 직관적 삭제 방법**을 모두 지원합니다:
+
+| 방법 | 동작 | 구현 위치 |
+|------|------|-----------|
+| ❌ X 버튼 | 요소 선택 → 우상단 빨간 X 클릭 | `DraggableText.tsx`, `DraggableImage.tsx` |
+| ⌨️ 키보드 | 요소 선택 → `Delete` 또는 `Backspace` 키 | `page.tsx` (글로벌 keydown 리스너) |
+| 🖱️ 우클릭 | 요소 우클릭 → "삭제하기" 메뉴 클릭 | `EditorCanvas.tsx` (커스텀 컨텍스트 메뉴) |
+
+##### 5-1. 키보드 삭제 (Delete / Backspace)
+
+```typescript
+// page.tsx — 글로벌 키보드 리스너
+useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement;
+        // INPUT, TEXTAREA, contentEditable 안에서는 무시
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+            return;
+        }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlockId) {
+            const isText = textBlocks.some(b => b.id === selectedBlockId);
+            const isImage = imageBlocks.some(b => b.id === selectedBlockId);
+            if (isText) removeTextBlock(selectedBlockId);
+            else if (isImage) removeImageBlock(selectedBlockId);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+}, [selectedBlockId, textBlocks, imageBlocks, removeTextBlock, removeImageBlock]);
+```
+
+**핵심 포인트:**
+- `INPUT`, `TEXTAREA`, `contentEditable` 요소에 포커스가 있으면 삭제 키 이벤트를 무시 → 텍스트 입력 중 실수로 블록이 삭제되지 않음
+- 캔버스 영역에서만 작동
+
+##### 5-2. 우클릭 컨텍스트 메뉴
+
+```typescript
+// EditorCanvas.tsx — 커스텀 컨텍스트 메뉴
+const [contextMenu, setContextMenu] = React.useState<{
+    x: number; y: number; visible: boolean;
+    targetId: string; type: 'text' | 'image';
+}>({ x: 0, y: 0, visible: false, targetId: '', type: 'text' });
+
+const handleContextMenu = (e: React.MouseEvent, id: string, type: 'text' | 'image') => {
+    e.preventDefault();  // 브라우저 기본 메뉴 차단
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, visible: true, targetId: id, type });
+    setSelectedBlockId(id);
+};
+```
+
+**UI 렌더링:**
+- `fixed` 포지셔닝으로 클릭 위치에 정확히 표시
+- `Trash2` 아이콘 + "삭제하기" 텍스트
+- `hover:bg-red-50` 호버 효과
+- 아무 곳 클릭 시 자동 닫힘 (글로벌 `click` 이벤트 리스너)
+
+##### 5-3. 컴포넌트 Props 확장
+
+두 드래그 컴포넌트 모두 `onContextMenu` 옵셔널 prop이 추가됨:
+
+```typescript
+// DraggableText.tsx
+interface DraggableTextProps extends TextBlock {
+  isSelected: boolean;
+  zoom: number;
+  onContextMenu?: (e: React.MouseEvent) => void;  // 새로 추가
+}
+
+// DraggableImage.tsx
+interface DraggableImageProps {
+  // ... 기존 props
+  onContextMenu?: (e: React.MouseEvent) => void;   // 새로 추가
+}
+```
+
+---
+
+### 🔄 상태 관리 흐름도
+
+```
+[사용자 동작]
+    │
+    ├── Delete/Backspace 키 입력
+    │       ↓
+    │   page.tsx: handleKeyDown()
+    │       ↓
+    │   useEditorStore: removeTextBlock() / removeImageBlock()
+    │       ↓
+    │   EditorCanvas 리렌더링 (요소 제거)
+    │
+    ├── 요소 우클릭
+    │       ↓
+    │   DraggableText/Image: onContextMenu → EditorCanvas: handleContextMenu()
+    │       ↓
+    │   컨텍스트 메뉴 표시 (fixed 위치)
+    │       ↓
+    │   "삭제하기" 클릭 → removeTextBlock() / removeImageBlock()
+    │       ↓
+    │   메뉴 닫힘 + 요소 제거
+    │
+    └── X 버튼 클릭
+            ↓
+        DraggableText/Image 내부: removeTextBlock(id) / removeImageBlock(id)
+            ↓
+        EditorCanvas 리렌더링 (요소 제거)
+```
+
+---
+
+### 📏 줌(Zoom) 시스템
+
+| 속성 | 값 |
+|------|-----|
+| 최소 줌 | 1.0x |
+| 최대 줌 | 10.0x |
+| 줌 방식 | Alt + 마우스 휠 / 슬라이더 / 화면 맞춤 버튼 |
+| 자동 맞춤 | 용지 크기 변경 시 뷰포트에 맞게 자동 조절 |
+| 좌표 환산 | `실제 위치(px) = mm값 × zoom` |
+| 폰트 환산 | `표시 크기(px) = fontSize(mm) × (zoom / 3)` |
+
+---
+
+### 🖨️ 지원 용지 규격
+
+에디터에서 사이드바를 통해 선택 가능한 용지 규격:
+
+| 규격 | 크기 (mm) | 용도 |
+|------|-----------|------|
+| A4 | 210 × 297 | 표준 카드 |
+| A5 | 148 × 210 | 반접기 카드 |
+| A6 | 105 × 148 | 엽서형 카드 |
+| B5 | 176 × 250 | 중형 카드 |
+
+접지 방식: 없음(Flat) / 반접기(Half) 지원  
+방향: 가로(Landscape) / 세로(Portrait) 전환 가능
+
+---
+
+### 🔧 향후 개선 과제
+
+1. **Undo/Redo 시스템**: 삭제 실수 시 되돌리기 기능
+2. **다중 선택 삭제**: Shift/Ctrl 클릭으로 여러 요소 동시 선택 후 일괄 삭제
+3. **컨텍스트 메뉴 확장**: 삭제 외에 복제, 잠금, Z-Index 조정 메뉴 추가
+4. **클립보드**: Ctrl+C/V 복사 붙여넣기
+5. **고해상도 PDF 출력**: 프린트 커맨더 에이전트 연동 완성
