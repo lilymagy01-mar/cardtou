@@ -919,51 +919,31 @@ export default function Home() {
               )}
             </div>
 
-            {/* 3. 추천 메시지 & 펜김의 감성 큐레이션 */}
-            <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm ring-1 ring-amber-100/50">
-              <button
-                onClick={() => toggleSection('suggestions')}
-                className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-50/50 to-white hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-amber-100 rounded-lg flex items-center justify-center text-[10px]">🖋️</div>
-                  <span className="text-sm font-bold text-gray-700">문구 라이브러리</span>
-                </div>
-                <div className={`transition-transform duration-300 ${expandedSections.includes('suggestions') ? 'rotate-180' : ''}`}>
-                  <ArrowDown size={14} className="text-gray-400" />
-                </div>
-              </button>
-
-              {expandedSections.includes('suggestions') && (
-                <div className="px-3 pb-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <p className="text-[10px] text-amber-600 font-bold px-1 italic">"{aiDesignTheme || 'Modern'} 스타일에 어울리는 글귀를 준비했어요~"</p>
-                  <div className="space-y-1.5 pt-1">
-                    {(PEN_KIM_COLLECTION[aiDesignTheme as keyof typeof PEN_KIM_COLLECTION] || PEN_KIM_COLLECTION['modern']).map((quote, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          const id = addTextBlock({
-                            text: quote,
-                            x: 105,
-                            y: 80,
-                            fontSize: 14,
-                            textAlign: 'center',
-                            colorHex: '#334155',
-                            fontFamily: "'Nanum Myeongjo', serif",
-                            opacity: 1.0,
-                            width: 150,
-                            lineHeight: 1.6
-                          });
-                          toast.success('펜김의 진심이 카드에 담겼습니다! ✨');
-                        }}
-                        className="w-full text-left p-3 text-[11px] font-medium leading-relaxed bg-white border border-gray-50 rounded-xl hover:border-amber-400 hover:bg-amber-50 hover:shadow-sm transition-all text-gray-700 active:scale-[0.98]"
-                      >
-                        {quote}
-                      </button>
-                    ))}
+            {/* 3. 추천 메시지 & 감성 큐레이션 (복구 완료) */}
+            <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm p-3 mb-2">
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => { setActiveSuggestionType('message'); setIsSuggestionModalOpen(true); }}
+                  className="w-full flex items-center gap-3 p-4 bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-2xl hover:shadow-md hover:border-blue-400 transition-all group"
+                >
+                  <div className="w-10 h-10 bg-blue-500 text-white rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform"><MessageSquareText size={20} /></div>
+                  <div className="text-left">
+                    <p className="text-sm font-black text-gray-800">메세지 샘플 검색</p>
+                    <p className="text-[10px] text-gray-400 font-bold">사랑, 축하, 감사 테마별 문구</p>
                   </div>
-                </div>
-              )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveSuggestionType('quote'); setIsSuggestionModalOpen(true); }}
+                  className="w-full flex items-center gap-3 p-4 bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-2xl hover:shadow-md hover:border-indigo-400 transition-all group"
+                >
+                  <div className="w-10 h-10 bg-indigo-500 text-white rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform"><Sparkles size={20} /></div>
+                  <div className="text-left">
+                    <p className="text-sm font-black text-gray-800">감성 명언 찾기</p>
+                    <p className="text-[10px] text-gray-400 font-bold">인생, 성공, 행복 격언 모음</p>
+                  </div>
+                </button>
+              </div>
             </div>
 
             {/* 4. Inside Setting Section (Accordion) - Only if half fold & inside page */}
