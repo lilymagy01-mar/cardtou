@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
 export interface PrintPageData {
@@ -12,7 +12,10 @@ export interface PrintPageData {
     size: number, 
     colorHex: string, 
     fontFamily?: string,
-    textAlign?: 'left' | 'center' | 'right'
+    textAlign?: 'left' | 'center' | 'right',
+    rotation?: number,
+    textShadow?: string,
+    opacity?: number
   }[];
   imageBlocks?: {
     url: string | null,
@@ -20,19 +23,34 @@ export interface PrintPageData {
     y: number,
     width: number,
     height: number,
-    isPrintable: boolean
+    isPrintable: boolean,
+    rotation?: number
   }[];
 }
 
 export interface PrintJobData {
   paperSizeMm: { width: number, height: number };
-  pages?: PrintPageData[]; // 신규 멀티페이지 포맷
-  backgroundUrl?: string | null; // 레거시 지원
-  textBlocks?: any[];           // 레거시 지원
+  pages?: PrintPageData[];
+  backgroundUrl?: string | null;
+  textBlocks?: PrintPageData['textBlocks'];
   labelType?: string;
+  selectedCells?: number[];
+  nUpConfig?: {
+    cols: number;
+    rows: number;
+    cells: number;
+    cellWidthMm: number;
+    cellHeightMm: number;
+    marginLeftMm: number;
+    marginTopMm: number;
+    hGapMm: number;
+    vGapMm: number;
+    rotate90: boolean;
+    outputPaperSizeMm: { width: number, height: number };
+  };
 }
 
-const LABEL_CONFIGS: Record<string, {
+export const LABEL_CONFIGS: Record<string, {
   cells: number;
   cols: number;
   widthMm: number;
@@ -42,13 +60,14 @@ const LABEL_CONFIGS: Record<string, {
   hGapMm: number;
   vGapMm: number;
 }> = {
-  'formtec-3101': { cells: 1, cols: 1, widthMm: 210, heightMm: 297, marginTopMm: 0, marginLeftMm: 0, hGapMm: 0, vGapMm: 0 },
-  'formtec-3102': { cells: 2, cols: 1, widthMm: 199.6, heightMm: 143.5, marginTopMm: 5, marginLeftMm: 5.2, hGapMm: 0, vGapMm: 0 },
-  'formtec-3104': { cells: 4, cols: 2, widthMm: 99.1, heightMm: 143.5, marginTopMm: 5, marginLeftMm: 5, hGapMm: 2, vGapMm: 0 },
-  'formtec-3107': { cells: 6, cols: 2, widthMm: 99.1, heightMm: 93.1, marginTopMm: 8.5, marginLeftMm: 5, hGapMm: 2, vGapMm: 0 },
-  'formtec-3108': { cells: 8, cols: 2, widthMm: 99.1, heightMm: 67.7, marginTopMm: 13, marginLeftMm: 5, hGapMm: 2, vGapMm: 0 },
-  'formtec-3109': { cells: 12, cols: 2, widthMm: 99.1, heightMm: 45.0, marginTopMm: 11, marginLeftMm: 5, hGapMm: 2, vGapMm: 0 }
+  'formtec-1':  { cells: 1,  cols: 1, widthMm: 210.0, heightMm: 297.0, marginTopMm: 0, marginLeftMm: 0, hGapMm: 0, vGapMm: 0 },
+  'formtec-2':  { cells: 2,  cols: 1, widthMm: 199.6, heightMm: 143.5, marginTopMm: 5.0, marginLeftMm: 5.2, hGapMm: 0, vGapMm: 0 },
+  'formtec-6':  { cells: 6,  cols: 2, widthMm: 105.0, heightMm: 99.0,  marginTopMm: 0, marginLeftMm: 0, hGapMm: 0, vGapMm: 0 },
+  'formtec-8':  { cells: 8,  cols: 2, widthMm: 99.1,  heightMm: 67.7,  marginTopMm: 13.1, marginLeftMm: 4.7, hGapMm: 2.0, vGapMm: 0 },
+  'formtec-12': { cells: 12, cols: 3, widthMm: 63.5,  heightMm: 70.0,  marginTopMm: 8.5, marginLeftMm: 9.5, hGapMm: 0, vGapMm: 0 }
 };
+
+const MM_TO_PT = 2.83465;
 
 export class PrintCommander {
   
@@ -60,7 +79,7 @@ export class PrintCommander {
     return {
       r: parseInt(cleanHex.substring(0, 2), 16) / 255,
       g: parseInt(cleanHex.substring(2, 4), 16) / 255,
-      b: parseInt(cleanHex.substring(4, 6), 16) / 255,
+      b: parseInt(cleanHex.substring(4, 6), 16) / 255
     };
   }
 
@@ -68,177 +87,162 @@ export class PrintCommander {
     try {
       const pdfDoc = await PDFDocument.create();
       pdfDoc.registerFontkit(fontkit);
-
-      // 폰트 리소스 맵핑 (로컬 에셋 전략)
-      const FONT_URLS: Record<string, string> = {
-        'Jua': '/fonts/Jua-Regular.ttf',
-        'Gugi': '/fonts/Gugi-Regular.ttf',
-        'Pen': '/fonts/NanumPenScript-Regular.ttf',
-        'Noto': '/fonts/Pretendard-Regular.otf',
-        'default': '/fonts/Pretendard-Regular.otf'
-      };
-
-      const embeddedFonts: Record<string, any> = {};
       
-      // 최중요: 어떤 상황에서도 인쇄가 가능하도록 표준 폰트(Helvetica)를 기본값으로 로드
-      const standardFont = await pdfDoc.embedStandardFont(StandardFonts.Helvetica);
-      embeddedFonts['fallback'] = standardFont;
-
-      const loadFont = async (name: string, url: string) => {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-          const bytes = await response.arrayBuffer();
-          embeddedFonts[name] = await pdfDoc.embedFont(bytes);
-        } catch (e) {
-          console.error(`Font load failed: ${name} (${url}). Using fallback.`, e);
-          // 실패 시 표준 폰트로 대체하여 프로세스 중단 방지
-          embeddedFonts[name] = standardFont;
-        }
-      };
-
-      // 병렬로 폰트 로드
-      await Promise.all([
-        loadFont('Jua', FONT_URLS['Jua']),
-        loadFont('Gugi', FONT_URLS['Gugi']),
-        loadFont('Pen', FONT_URLS['Pen']),
-        loadFont('default', FONT_URLS['default'])
-      ]);
-
+      const standardFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      
+      // 폰트 캐싱
+      const embeddedFonts: Record<string, any> = {};
       const getFont = (family?: string) => {
-        if (!family) return embeddedFonts['default'] || embeddedFonts['fallback'];
-        if (family.includes('Jua')) return embeddedFonts['Jua'] || embeddedFonts['fallback'];
-        if (family.includes('Gugi')) return embeddedFonts['Gugi'] || embeddedFonts['fallback'];
-        if (family.includes('Pen')) return embeddedFonts['Pen'] || embeddedFonts['fallback'];
-        return embeddedFonts['default'] || embeddedFonts['fallback'];
+        if (!family) return standardFont;
+        return embeddedFonts[family] || standardFont;
       };
 
-      // 페이지 리스트 구성
-      const renderPages: PrintPageData[] = jobData.pages || [
-        { backgroundUrl: jobData.backgroundUrl || null, textBlocks: jobData.textBlocks || [] }
-      ];
+      // 폰트 임베딩 로직 (필요 시 추가)
+      // 현재는 에디터에서 사용하는 폰트가 PDF에도 포함되어 있다고 가정하거나 표준 폰트 사용
 
-      for (const renderData of renderPages) {
-        const config = jobData.labelType ? LABEL_CONFIGS[jobData.labelType] : null;
-        const isGrid = !!config;
-        
-        const finalPaperWidthMm = isGrid ? 210 : jobData.paperSizeMm.width;
-        const finalPaperHeightMm = isGrid ? 297 : jobData.paperSizeMm.height;
+      const pagesToRender = jobData.pages || [{
+        backgroundUrl: jobData.backgroundUrl || null,
+        textBlocks: jobData.textBlocks || []
+      }];
 
-        const ptWidth = finalPaperWidthMm * 2.83465;
-        const ptHeight = finalPaperHeightMm * 2.83465;
-        
-        const page = pdfDoc.addPage([ptWidth, ptHeight]);
+      const isGrid = !!jobData.labelType;
+      const config = isGrid ? LABEL_CONFIGS[jobData.labelType!] : null;
 
-        const embedImage = async (url: string) => {
-          try {
-            let imgBytes;
-            if (url.startsWith('data:image')) {
-              const base64Str = url.split(',')[1];
-              imgBytes = Uint8Array.from(atob(base64Str), c => c.charCodeAt(0)).buffer;
-            } else {
-              imgBytes = await fetch(url).then(res => res.arrayBuffer());
-            }
-            return url.toLowerCase().includes('.png') || url.startsWith('data:image/png') 
-              ? await pdfDoc.embedPng(imgBytes) 
-              : await pdfDoc.embedJpg(imgBytes);
-          } catch (e) {
-            console.warn('Embed Error', url, e);
-            return null;
-          }
-        };
+      for (const renderData of pagesToRender) {
+        // 폼텍 라벨 인쇄 시 출력 용지는 항상 A4(210x297)로 고정
+        const outputWidthMm = isGrid ? 210 : (jobData.paperSizeMm.width || 210);
+        const outputHeightMm = isGrid ? 297 : (jobData.paperSizeMm.height || 297);
 
-        let bgImage, frontBgImage, backBgImage;
-        if (renderData.backgroundUrl) bgImage = await embedImage(renderData.backgroundUrl);
-        if (renderData.frontBackgroundUrl) frontBgImage = await embedImage(renderData.frontBackgroundUrl);
-        if (renderData.backBackgroundUrl) backBgImage = await embedImage(renderData.backBackgroundUrl);
+        const page = pdfDoc.addPage([
+          outputWidthMm * MM_TO_PT,
+          outputHeightMm * MM_TO_PT
+        ]);
 
-        const repeatCount = isGrid ? config.cells : 1;
-        
-        for (let i = 0; i < repeatCount; i++) {
+        const cellsToRender = isGrid 
+          ? (jobData.selectedCells?.length ? jobData.selectedCells : Array.from({length: config!.cells}, (_, i) => i))
+          : [0];
+
+        for (const cellIndex of cellsToRender) {
           let offsetX = 0;
           let offsetY = 0;
-          let cellWidth = ptWidth;
-          let cellHeight = ptHeight;
+          let cellWidth = page.getWidth();
+          let cellHeight = page.getHeight();
 
-          if (isGrid) {
-            const col = i % config.cols;
-            const row = Math.floor(i / config.cols);
-            cellWidth = config.widthMm * 2.83465;
-            cellHeight = config.heightMm * 2.83465;
-            offsetX = (config.marginLeftMm + (col * (config.widthMm + config.hGapMm))) * 2.83465;
-            offsetY = ptHeight - ((config.marginTopMm + (row * (config.heightMm + config.vGapMm)) + config.heightMm)) * 2.83465;
-          }
-
-          if (bgImage) {
-            page.drawImage(bgImage, { x: offsetX, y: offsetY, width: cellWidth, height: cellHeight });
-          }
-          if (backBgImage) {
-            // Left half
-            page.drawImage(backBgImage, { 
-              x: offsetX, 
-              y: offsetY, 
-              width: cellWidth / 2, 
-              height: cellHeight 
-            });
-          }
-          if (frontBgImage) {
-            // Right half
-            page.drawImage(frontBgImage, { 
-              x: offsetX + (cellWidth / 2), 
-              y: offsetY, 
-              width: cellWidth / 2, 
-              height: cellHeight 
-            });
+          if (isGrid && config) {
+            const row = Math.floor(cellIndex / config.cols);
+            const col = cellIndex % config.cols;
+            
+            offsetX = (config.marginLeftMm + col * (config.widthMm + config.hGapMm)) * MM_TO_PT;
+            // PDF 좌표는 아래서 위로 증가하므로, A4 높이(297mm)를 기준으로 위에서부터 마진을 뺌
+            offsetY = (297 - (config.marginTopMm + (row + 1) * config.heightMm + row * config.vGapMm)) * MM_TO_PT;
+            
+            cellWidth = config.widthMm * MM_TO_PT;
+            cellHeight = config.heightMm * MM_TO_PT;
           }
 
-          // Render Image Blocks
+          // 배경 이미지 렌더링
+          if (renderData.backgroundUrl) {
+            try {
+              const bgBytes = await fetch(renderData.backgroundUrl).then(res => res.arrayBuffer());
+              const bgImg = renderData.backgroundUrl.includes('png') 
+                ? await pdfDoc.embedPng(bgBytes)
+                : await pdfDoc.embedJpg(bgBytes);
+              
+              page.drawImage(bgImg, {
+                x: offsetX,
+                y: offsetY,
+                width: cellWidth,
+                height: cellHeight
+              });
+            } catch (e) {
+              console.warn('Background image embedding failed', e);
+            }
+          }
+
+          // 이미지 블록 렌더링
           if (renderData.imageBlocks) {
             for (const imgBlock of renderData.imageBlocks) {
-              if (!imgBlock.isPrintable || !imgBlock.url) continue;
-              const img = await embedImage(imgBlock.url);
-              if (img) {
-                const imgW = (imgBlock.width / jobData.paperSizeMm.width) * cellWidth;
-                const imgH = (imgBlock.height / jobData.paperSizeMm.height) * cellHeight;
-                page.drawImage(img, {
-                  x: offsetX + ((imgBlock.x / jobData.paperSizeMm.width) * cellWidth) - (imgW / 2),
-                  y: offsetY + cellHeight - ((imgBlock.y / jobData.paperSizeMm.height) * cellHeight) - (imgH / 2),
-                  width: imgW,
-                  height: imgH
-                });
+              if (imgBlock.url && imgBlock.isPrintable) {
+                try {
+                  const imgBytes = await fetch(imgBlock.url).then(res => res.arrayBuffer());
+                  const img = imgBlock.url.includes('png') || imgBlock.url.includes('base64')
+                    ? await pdfDoc.embedPng(imgBytes)
+                    : await pdfDoc.embedJpg(imgBytes);
+                  
+                  const imgX = offsetX + (imgBlock.x / (jobData.paperSizeMm.width || 210)) * cellWidth;
+                  const imgY = offsetY + (imgBlock.y / (jobData.paperSizeMm.height || 297)) * cellHeight;
+                  const imgW = (imgBlock.width / (jobData.paperSizeMm.width || 210)) * cellWidth;
+                  const imgH = (imgBlock.height / (jobData.paperSizeMm.height || 297)) * cellHeight;
+
+                  page.drawImage(img, {
+                    x: imgX,
+                    y: imgY,
+                    width: imgW,
+                    height: imgH,
+                    rotate: imgBlock.rotation ? degrees(imgBlock.rotation) : undefined
+                  });
+                } catch (e) {
+                  console.warn('Image block embedding failed', e);
+                }
               }
             }
           }
 
+          // 텍스트 블록 렌더링
           for (const block of renderData.textBlocks) {
             const color = this.hexToRgb(block.colorHex);
             const font = getFont(block.fontFamily);
-            
-            // X, Y 좌표 계산 (mm -> pt)
-            // 화면 좌표 (pixel)를 mm 비율로 변환하여 배치
-            // 현재 화면 주석 기준 105mm (카드 너비)를 기준으로 x가 배치됨
-            let pdfX = offsetX + ((block.x / (jobData.paperSizeMm.width || 210)) * cellWidth);
-            const pdfY = offsetY + cellHeight - ((block.y / (jobData.paperSizeMm.height || 297)) * cellHeight) - (block.size * 0.8);
-            
-            if (block.textAlign && block.textAlign !== 'left') {
-              const textWidth = font.widthOfTextAtSize(block.text, block.size);
-              if (block.textAlign === 'center') {
-                pdfX -= (textWidth / 2);
-              } else if (block.textAlign === 'right') {
-                pdfX -= textWidth;
-              }
+            const pdfFontSize = block.size * MM_TO_PT * 0.35;
+
+            let textLines = [block.text];
+            if (isGrid && config) {
+              const { TypographyWizard } = await import('./typographyWizard');
+              const marginMm = 5;
+              const maxWidthMm = config.widthMm - (marginMm * 2);
+              const maxWidthPt = maxWidthMm * MM_TO_PT;
+              
+              textLines = TypographyWizard.applyWordWrap(
+                block.text, 
+                maxWidthPt, 
+                pdfFontSize, 
+                block.fontFamily
+              );
             }
 
-            page.drawText(block.text || '', {
-              x: pdfX,
-              y: pdfY,
-              size: block.size,
-              font: font,
-              color: rgb(color.r, color.g, color.b),
+            const lineHeight = pdfFontSize * 1.2;
+            const totalTextHeight = textLines.length * lineHeight;
+
+            textLines.forEach((line, index) => {
+              let pdfX = offsetX + ((block.x / (jobData.paperSizeMm.width || 210)) * cellWidth);
+              let pdfY = offsetY + cellHeight - ((block.y / (jobData.paperSizeMm.height || 297)) * cellHeight);
+              
+              // 수직 정렬 보정
+              pdfY = pdfY + (totalTextHeight / 2) - (index * lineHeight) - (pdfFontSize * 0.8);
+
+              if (block.textAlign && block.textAlign !== 'left') {
+                try {
+                  const textWidth = font.widthOfTextAtSize(line, pdfFontSize);
+                  if (block.textAlign === 'center') {
+                    pdfX -= (textWidth / 2);
+                  } else if (block.textAlign === 'right') {
+                    pdfX -= textWidth;
+                  }
+                } catch { }
+              }
+
+              page.drawText(line || '', {
+                x: pdfX,
+                y: pdfY,
+                size: pdfFontSize,
+                font: font,
+                color: rgb(color.r, color.g, color.b),
+                opacity: block.opacity ?? 1,
+                rotate: block.rotation ? degrees(block.rotation) : undefined
+              });
             });
           }
         }
-        if (isGrid) break;
+        if (isGrid) break; // 라벨은 한 페이지만 지원 (현재)
       }
 
       return await pdfDoc.save();
@@ -248,13 +252,9 @@ export class PrintCommander {
     }
   }
 
-  /**
-   * 브라우저에서 생성된 PDF를 로컬 연결된 프린터 스풀러로 팝업 시킵니다.
-   */
-  static triggerPrintPopup(pdfBytes: Uint8Array, filename: string = 'output.pdf') {
-    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+  static triggerPrintPopup(pdfBytes: Uint8Array) {
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
-    
     const printWindow = window.open(blobUrl);
     if (printWindow) {
       printWindow.onload = () => {

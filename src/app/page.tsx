@@ -6,6 +6,7 @@ import {
   Type, 
   Image as ImageIcon, 
   Download, 
+  Save,
   Settings, 
   AlignLeft, 
   AlignCenter, 
@@ -19,6 +20,11 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Minus,
+  Plus,
+  Bold,
+  Palette,
+  Grid,
   User, 
   MessageSquareText, 
   Smile, 
@@ -31,7 +37,27 @@ import {
 import { useState, useEffect } from 'react';
 import { AIConnector } from '@/lib/agents/aiConnector';
 import { TypographyWizard } from '@/lib/agents/typographyWizard';
+import { LABEL_CONFIGS } from '@/lib/agents/printCommander';
 import { CATEGORY_LABELS, MESSAGE_SUGGESTIONS, QUOTE_SUGGESTIONS } from '@/lib/constants/ContentSuggestions';
+import { GALLERY_CATEGORIES, FREE_TEMPLATES, CALLIGRAPHY_PHRASES, CALLIGRAPHY_FONTS } from '@/lib/constants/templates';
+
+const PAPER_PRESETS = [
+  // 표준 규격
+  { id: 'a5', label: 'A5 (148×210mm)', widthMm: 210, heightMm: 148, group: '표준 규격' },
+  { id: 'a4', label: 'A4 (210×297mm)', widthMm: 297, heightMm: 210, group: '표준 규격' },
+  { id: 'a3', label: 'A3 (297×420mm)', widthMm: 420, heightMm: 297, group: '표준 규격' },
+  { id: 'a2', label: 'A2 (420×594mm)', widthMm: 594, heightMm: 420, group: '표준 규격' },
+  { id: 'a6', label: 'A6 (105×148mm)', widthMm: 148, heightMm: 105, group: '표준 규격' },
+  { id: 'custom-card', label: '일반 카드 (100×150mm)', widthMm: 150, heightMm: 100, group: '표준 규격' },
+  { id: 'postcard', label: '엽서 (105 x 148 mm)', widthMm: 105, heightMm: 148, group: '표준 규격' },
+  // 폼텍 라벨 (사용자 요청 5종: 1, 2, 6, 8, 12칸)
+  { id: 'formtec-1', label: '3130 (1칸 - A4 전체)', widthMm: 210, heightMm: 297, group: '폼텍 라벨' },
+  { id: 'formtec-2', label: '3102 (2칸 - A4 반절)', widthMm: 199.6, heightMm: 143.5, group: '폼텍 라벨' },
+  { id: 'formtec-6', label: '3639 (6칸 - 105x99mm)', widthMm: 105, heightMm: 99, group: '폼텍 라벨' },
+  { id: 'formtec-8', label: '3114 (8칸 - 물류용)', widthMm: 99.1, heightMm: 67.7, group: '폼텍 라벨' },
+  { id: 'formtec-12', label: '3112 (12칸 - 주소용)', widthMm: 63.5, heightMm: 70, group: '폼텍 라벨' },
+];
+
 
 export default function Home() {
   const { 
@@ -85,29 +111,173 @@ export default function Home() {
     setZoom,
     shopSettings,
     updateShopSettings,
-    applyShopBranding
+    applyShopBranding,
+    pages,
   } = useEditorStore();
 
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [isAiWizardOpen, setIsAiWizardOpen] = useState(false);
+  const [aiModalType, setAiModalType] = useState<'theme' | 'magic' | null>(null);
   const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const [isShopSettingsOpen, setIsShopSettingsOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [activeSuggestionType, setActiveSuggestionType] = useState<'quote' | 'message'>('message');
   const [isGenerating, setIsGenerating] = useState(false);
   const [savedDesigns, setSavedDesigns] = useState<any[]>([]);
+  const [activeGalleryTab, setActiveGalleryTab] = useState<string>('my_designs');
   
   // Sidebar accordion states
   const [expandedSections, setExpandedSections] = useState<string[]>(['format', 'branding']);
+  
+  // AI Card Generation states
+  const [aiOccasion, setAiOccasion] = useState('');
+  const [aiRelationship, setAiRelationship] = useState('');
+  const [aiRecipient, setAiRecipient] = useState('');
+  const [aiSender, setAiSender] = useState('');
+  const [aiCustomNote, setAiCustomNote] = useState('');
+  const [aiThemePrompt, setAiThemePrompt] = useState(''); // 테마 생성용 커스텀 프롬프트
+  const [aiGeneratedMessages, setAiGeneratedMessages] = useState<{message: string; tone: string}[]>([]);
+  const [aiSelectedMessage, setAiSelectedMessage] = useState('');
+  const [aiStep, setAiStep] = useState<'input' | 'messages' | 'complete'>('input');
+  
+  // Formtec batch mode
+  const [isFormtecMode, setIsFormtecMode] = useState(false);
+  const [formtecLabelType, setFormtecLabelType] = useState('formtec-1');
+  const [formtecMessage, setFormtecMessage] = useState('');
+  const [formtecBgColor, setFormtecBgColor] = useState('#FFF0F5');
+  const [formtecTextColor, setFormtecTextColor] = useState('#9B2335');
+  const [formtecFontSize, setFormtecFontSize] = useState(14);
+  const [formtecTextAlign, setFormtecTextAlign] = useState<'left' | 'center' | 'right'>('center');
+  const [formtecIsBold, setFormtecIsBold] = useState(false);
+  const [formtecSelectedCells, setFormtecSelectedCells] = useState<number[]>([]);
+
+  // Auto-open/close properties accordion based on element selection
+  useEffect(() => {
+    if (selectedBlockId) {
+      setExpandedSections(prev => 
+        prev.includes('properties') ? prev : [...prev, 'properties']
+      );
+    } else {
+      setExpandedSections(prev => 
+        prev.filter(s => s !== 'properties')
+      );
+    }
+  }, [selectedBlockId]);
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => 
       prev.includes(section) ? prev.filter(s => s !== section) : [...prev, section]
     );
   };
+
+  // 폼텍 모드 진입 시 전체 메시지(표지 + 내지) 실시간 동기화
+  useEffect(() => {
+    if (isFormtecMode) {
+      // 다른 페이지의 텍스트와 모두 합쳐서 초기값 설정
+      const otherPage = activePage === 'outside' ? 'inside' : 'outside';
+      const otherBlocks = pages[otherPage]?.textBlocks || [];
+      
+      const allTexts = [
+        ...textBlocks.map(b => b.text),
+        ...otherBlocks.map(b => b.text)
+      ].filter(t => t && t.trim() !== '' && !t.includes('To.') && !t.includes('From.'));
+      
+      const combinedText = allTexts.join('\n').trim();
+      
+      // 기존 메시지가 비어있거나, 완전히 새로운 모드 진입인 경우에만 초기화
+      // (이미 수동으로 수정한 경우는 덮어쓰지 않음)
+      setFormtecMessage(prev => {
+        if (!prev) return combinedText;
+        return prev;
+      });
+    }
+  }, [isFormtecMode, activePage]); // textBlocks 의존성 제거하여 수동 수정 유지
+
+  // 상단 용지 선택 시 폼텍 라벨인 경우 해당 모드로 자동 준비
+  useEffect(() => {
+    if (selectedPresetId.startsWith('formtec-')) {
+      setFormtecLabelType(selectedPresetId);
+    }
+  }, [selectedPresetId]);
   
   // Suggestion Modal State
   const [selectedCategory, setSelectedCategory] = useState<string>('lover');
   const [selectedLang, setSelectedLang] = useState<'ko' | 'en'>('ko');
+
+  const loadTemplate = (imageUrl: string, categoryId?: string) => {
+    const state = useEditorStore.getState();
+    const { addTextBlock, currentDimension, margins } = state;
+    
+    // 강제로 표지면 블록 비우기
+    state.setActivePage('outside');
+    const outState = useEditorStore.getState();
+    outState.textBlocks.forEach(b => outState.removeTextBlock(b.id));
+    outState.imageBlocks.forEach(b => outState.removeImageBlock(b.id));
+    
+    if (outState.foldType === 'half') {
+      outState.setFrontBackgroundUrl(imageUrl);
+      outState.setBackBackgroundUrl(null);
+    } else {
+      outState.setBackgroundUrl(imageUrl);
+    }
+
+    // AI/템플릿 선택 시, 카테고리에 맞는 캘리그라피 텍스트 자동 추가
+    if (categoryId && CALLIGRAPHY_PHRASES[categoryId]) {
+      const phrases = CALLIGRAPHY_PHRASES[categoryId];
+      const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
+      
+      const isLandscape = currentDimension.widthMm > currentDimension.heightMm;
+      let targetX = currentDimension.widthMm / 2;
+      let targetY = currentDimension.heightMm / 2;
+      
+      if (outState.foldType === 'half') {
+         if (isLandscape) {
+           targetX = currentDimension.widthMm * 0.75;
+           targetY = currentDimension.heightMm * 0.5;
+         } else {
+           targetX = currentDimension.widthMm * 0.5;
+           targetY = currentDimension.heightMm * 0.75;
+         }
+      }
+
+      const randomFont = CALLIGRAPHY_FONTS[Math.floor(Math.random() * CALLIGRAPHY_FONTS.length)];
+      
+      // 약간의 랜덤 회전 각도 (-4 ~ 4도)
+      const randomRotation = (Math.random() * 8) - 4;
+
+      // 폰트김(Typography Wizard): 글자 수 기반 Auto-scaling
+      const baseSize = Math.min(currentDimension.widthMm, currentDimension.heightMm) * 0.18;
+      const safeWidth = currentDimension.widthMm * 0.7; // Safe Area 70%
+      const autoScaledSize = Math.min(baseSize, safeWidth / Math.max(randomPhrase.length, 1) * 1.8);
+
+      useEditorStore.getState().addTextBlock({
+        text: randomPhrase,
+        x: targetX,
+        y: targetY - 20, // 약간 위쪽으로 배치
+        fontSize: autoScaledSize,
+        colorHex: '#ffffff', // 화이트 (밝게)
+        fontFamily: randomFont,
+        textAlign: 'center',
+        zIndex: 50,
+        rotation: randomRotation,
+        textShadow: 'rgba(0,0,0,0.85) 1px 2px 4px, rgba(0,0,0,0.7) 0px 4px 12px, rgba(0,0,0,0.5) 0px 0px 20px', // 강렬한 다중 그림자
+      });
+    }
+    
+    // 내지면 블록 비우기
+    state.setActivePage('inside');
+    const inState = useEditorStore.getState();
+    inState.textBlocks.forEach(b => inState.removeTextBlock(b.id));
+    inState.imageBlocks.forEach(b => inState.removeImageBlock(b.id));
+    
+    state.setActivePage('outside');
+    state.setDesignId(null);
+    setIsGalleryOpen(false);
+    setActiveGalleryTab('my_designs');
+    
+    // 사용자가 지정한 로고 등 샵 브랜딩 자동 배치
+    state.applyShopBranding('back');
+  };
 
   useEffect(() => {
     if (isGalleryOpen) {
@@ -192,125 +362,9 @@ export default function Home() {
     };
   }, [currentDimension, orientation, foldType, setZoom]);
 
-  const handleApplyTheme = async (theme: { name: string; bg: string; text: string; subText: string }) => {
-    setIsGenerating(true);
-    try {
-      const isFolding = foldType === 'half';
-      const midX = currentDimension.widthMm / 2;
-      const centerY = currentDimension.heightMm / 2;
-
-      // 1. AI 배경 생성 요청
-      const themeKey = theme.name.split(' ')[0].toLowerCase();
-      const aiTheme = themeKey.includes('로맨틱') ? 'romantic-pink' : 
-                      themeKey.includes('모던') ? 'modern-white' :
-                      themeKey.includes('빈티지') ? 'vintage-brown' : 'calm-blue';
-      
-      const aiResult = await AIConnector.generateBackground(aiTheme.split('-')[0]);
-      
-      // 2. 전체 데이터 초기화
-      const fontMap: Record<string, string> = {
-        'romantic-pink': "'Jua', sans-serif",
-        'modern-white': "'Noto Sans KR', sans-serif",
-        'vintage-brown': "'Nanum Pen Script', cursive",
-        'calm-blue': "'Gugi', sans-serif"
-      };
-      const selectedFont = fontMap[aiTheme] || 'sans-serif';
-
-      // --- OUTSIDE PAGE ---
-      setActivePage('outside');
-      // 기존 블록 삭제
-      textBlocks.forEach(b => removeTextBlock(b.id));
-      imageBlocks.forEach(b => removeImageBlock(b.id));
-
-      if (isFolding) {
-        setFrontBackgroundUrl(aiResult.imageUrl);
-        setBackBackgroundUrl(null); // 뒷면은 깨끗하게 유지 (꽃집 커스텀용)
-      } else {
-        setBackgroundUrl(aiResult.imageUrl);
-      }
-
-      const isLandscape = currentDimension.widthMm > currentDimension.heightMm;
-
-      // 앞면 문구 배치
-      let frontX = midX;
-      let frontY = centerY - 10;
-      
-      if (isFolding) {
-        if (isLandscape) {
-          frontX = midX + (midX / 2); // 우측 페이지
-          frontY = centerY - 10;
-        } else {
-          frontX = midX;
-          frontY = centerY + (centerY / 2); // 하단 페이지 (표지 정면)
-        }
-      }
-
-      let mainText = theme.text;
-      if (!mainText || mainText === theme.name) {
-        if (aiTheme.includes('romantic')) mainText = "사랑합니다";
-        else if (aiTheme.includes('vintage')) mainText = "감사합니다";
-        else if (aiTheme.includes('modern')) mainText = "수고하셨습니다";
-        else mainText = "평안을 빕니다";
-      }
-
-      const mainWidth = isFolding 
-        ? (isLandscape ? (currentDimension.widthMm / 2 - (margins.left + margins.right)) : (currentDimension.widthMm - (margins.left + margins.right)))
-        : (currentDimension.widthMm - (margins.left + margins.right));
-
-      const mainSize = TypographyWizard.getOptimalFontSize(mainText, mainWidth, 100, 32, selectedFont);
-      addTextBlock({ 
-        text: mainText, 
-        x: frontX,
-        y: frontY, 
-        fontSize: mainSize, 
-        textAlign: 'center', 
-        colorHex: aiTheme.includes('romantic') ? '#db2777' : '#1e293b',
-        fontFamily: selectedFont,
-        zIndex: 10,
-        width: mainWidth
-      });
-
-      // 뒷면 로고 플레이스홀더
-      if (isFolding) {
-        let backX = midX / 2;
-        let backY = currentDimension.heightMm - 20;
-
-        if (!isLandscape) {
-          backX = midX;
-          // 세로형의 뒷면은 캔버스의 상단 절반. 접었을 때의 하단은 y=0 부근.
-          backY = 30; 
-        }
-
-        addImageBlock({
-          url: null,
-          x: backX,
-          y: backY,
-          width: 30,
-          height: 10,
-          isPrintable: false,
-          rotation: 180 // 세로형 상단(뒷면) 로고는 180도 회전 필수
-        });
-      }
-
-      // --- INSIDE PAGE ---
-      setActivePage('inside');
-      // 기존 블록 삭제
-      textBlocks.forEach(b => removeTextBlock(b.id));
-      imageBlocks.forEach(b => removeImageBlock(b.id));
-      setMargins({ top: 10, right: 10, bottom: 10, left: 10 });
 
 
 
-      // 다시 메인(Outside) 페이지로 복귀
-      setActivePage('outside');
-      setIsAIModalOpen(false);
-    } catch (error) {
-      console.error(error);
-      alert('AI 테마 생성 중 오류가 발생했습니다.');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   const handleToggleToField = () => {
     const newState = !showToField;
@@ -409,33 +463,62 @@ export default function Home() {
     }
   };
 
-  const PAPER_PRESETS = [
-    // Standard Sizes
-    { label: 'A2 (420 x 594 mm)', widthMm: 420, heightMm: 594, id: 'a2', group: '표준 규격' },
-    { label: 'A3 (297 x 420 mm)', widthMm: 297, heightMm: 420, id: 'a3', group: '표준 규격' },
-    { label: 'A4 (210 x 297 mm)', widthMm: 210, heightMm: 297, id: 'a4', group: '표준 규격' },
-    { label: 'A5 (148 x 210 mm)', widthMm: 148, heightMm: 210, id: 'a5', group: '표준 규격' },
-    { label: 'B4 (250 x 353 mm)', widthMm: 250, heightMm: 353, id: 'b4', group: '표준 규격' },
-    { label: 'B5 (176 x 250 mm)', widthMm: 176, heightMm: 250, id: 'b5', group: '표준 규격' },
-    { label: '엽서 (105 x 148 mm)', widthMm: 105, heightMm: 148, id: 'postcard', group: '표준 규격' },
-    // Formtec
-    { label: 'A4 전면 (3101)', widthMm: 210, heightMm: 297, id: 'formtec-3101', group: '폼텍 라벨' },
-    { label: '폼텍 2칸 (3102)', widthMm: 199.6, heightMm: 143.5, id: 'formtec-3102', group: '폼텍 라벨' },
-    { label: '폼텍 4칸 (3104)', widthMm: 99.1, heightMm: 143.5, id: 'formtec-3104', group: '폼텍 라벨' },
-    { label: '폼텍 6칸 (3107)', widthMm: 99.1, heightMm: 93.1, id: 'formtec-3107', group: '폼텍 라벨' },
-    { label: '폼텍 8칸 (3108)', widthMm: 99.1, heightMm: 67.7, id: 'formtec-3108', group: '폼텍 라벨' },
-    { label: '폼텍 12칸 (3109)', widthMm: 99.1, heightMm: 45.0, id: 'formtec-3109', group: '폼텍 라벨' },
-  ];
+
+
+  // AI 스마트 디자인: 표지 앞면 이미지 생성 및 안착에 집중
+  const handleAISmartDesign = async (specificStyle?: string) => {
+    setIsGenerating(true);
+    const isFolding = foldType === 'half';
+    try {
+      // 1. 선제적 페이지 전환 (표지 디자인을 보여줌)
+      setActivePage('outside');
+
+      // 2. AI 이미지 생성 요청 (합쳐진 엔진 사용)
+      const response = await fetch('/api/ai/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          description: specificStyle || aiThemePrompt || 'Beautiful artistic cover',
+          theme: specificStyle || 'modern',
+          occasion: aiOccasion 
+        }),
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '디자인 생성 실패');
+
+      const imageUrl = data.imageUrl;
+      
+      // 3. 표지 앞면 배경 적용
+      if (foldType === 'half') {
+        setFrontBackgroundUrl(imageUrl);
+      } else {
+        setBackgroundUrl(imageUrl);
+      }
+
+      // 4. 상태 관리 정리
+      setIsAiWizardOpen(false);
+      setAiModalType(null); // 모든 AI 관련 모달 닫기
+      setAiThemePrompt(''); // 프롬프트 초기화
+      
+    } catch (error: any) {
+      console.error('AI Smart Design error:', error);
+      alert(`디자인 생성 중 오류가 발생했습니다: ${error.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const selectedBlock = textBlocks.find(b => b.id === selectedBlockId);
 
   const handleAddText = () => {
     addTextBlock({
-      text: '새로운 텍스트',
-      x: 50,
-      y: 50,
+      text: '내용을 입력하세요',
+      x: currentDimension.widthMm / 2,
+      y: currentDimension.heightMm / 2,
       fontSize: 24,
       colorHex: '#333333',
+      textAlign: 'center',
     });
   };
 
@@ -445,7 +528,11 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      setBackgroundUrl(dataUrl);
+      if (activePage === 'outside' && foldType === 'half') {
+        setFrontBackgroundUrl(dataUrl);
+      } else {
+        setBackgroundUrl(dataUrl);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -457,8 +544,64 @@ export default function Home() {
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       updateShopSettings({ logoUrl: dataUrl });
+      setTimeout(() => applyShopBranding('back'), 50);
     };
     reader.readAsDataURL(file);
+  };
+
+
+
+  // === 폼텍 전용 인쇄 ===
+  const handleFormtecPrint = async () => {
+    if (!formtecMessage.trim()) {
+      alert('인쇄할 메시지를 입력해주세요.');
+      return;
+    }
+    if (formtecSelectedCells.length === 0) {
+      alert('인쇄할 라벨 위치를 선택해주세요.');
+      return;
+    }
+    
+    setIsGenerating(true);
+    try {
+      const { PrintCommander } = await import('@/lib/agents/printCommander');
+      
+      // 심플 SVG 배경 생성
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="${formtecBgColor}"/></svg>`;
+      const bgUrl = `data:image/svg+xml;base64,${btoa(svg)}`;
+      
+      const config = LABEL_CONFIGS[formtecLabelType] || LABEL_CONFIGS['formtec-1'];
+      
+      const pdfBytes = await PrintCommander.generatePdf({
+        paperSizeMm: { width: 210, height: 297 }, // A4 고정
+        pages: [{
+          backgroundUrl: bgUrl,
+          textBlocks: [{
+            text: formtecMessage,
+            x: 105, 
+            y: 148.5, 
+            size: formtecFontSize,
+            colorHex: formtecTextColor,
+            fontFamily: "'Nanum Pen Script', cursive",
+            textAlign: formtecTextAlign,
+            fontWeight: formtecIsBold ? 'bold' : 'normal'
+          }]
+        }],
+        labelType: formtecLabelType,
+        selectedCells: formtecSelectedCells
+      });
+
+      if (pdfBytes) {
+        PrintCommander.triggerPrintPopup(pdfBytes);
+      } else {
+        alert('PDF 생성에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Formtec print failed:', error);
+      alert('폼텍 인쇄 중 오류가 발생했습니다.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handlePrint = async () => {
@@ -495,7 +638,10 @@ export default function Home() {
           size: b.fontSize,
           colorHex: b.colorHex,
           textAlign: b.textAlign,
-          fontFamily: b.fontFamily
+          fontFamily: b.fontFamily,
+          rotation: b.rotation,       // 프린트박: 회전 전달
+          textShadow: b.textShadow,   // 프린트박: 그림자 전달
+          opacity: b.opacity          // 프린트박: 투명도 전달
         })),
         imageBlocks: p.imageBlocks?.map(b => ({
           url: b.url,
@@ -503,7 +649,8 @@ export default function Home() {
           y: b.y,
           width: b.width,
           height: b.height,
-          isPrintable: b.isPrintable
+          isPrintable: b.isPrintable,
+          rotation: b.rotation        // 프린트박: 이미지 회전 전달
         }))
       })),
       labelType: labelType
@@ -519,7 +666,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-neutral-50 flex flex-col">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Gugi&family=Jua&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Dokdo&family=East+Sea+Dokdo&family=Gaegu&family=Gamja+Flower&family=Gugi&family=Hi+Melody&family=Jua&family=Nanum+Pen+Script&family=Yeon+Sung&family=Noto+Sans+KR:wght@400;700&display=swap');
       `}</style>
       {/* Top Navigation - Ultra Slimmed for Maximum Workspace */}
       <header className="bg-white border-b border-gray-200 px-6 py-1 flex items-center justify-between shadow-sm z-30 h-12">
@@ -548,7 +695,7 @@ export default function Home() {
           <button onClick={() => loadDesign()} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition shadow-sm font-medium text-sm">
             ID로 찾기
           </button>
-          <button onClick={saveDesign} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition shadow-md font-bold text-sm">
+          <button onClick={() => setIsSaveModalOpen(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition shadow-md font-bold text-sm">
             현재 디자인 저장
           </button>
           <div className="w-[1px] h-8 bg-gray-200 mx-2" />
@@ -556,7 +703,13 @@ export default function Home() {
             onClick={handlePrint}
             className="flex items-center gap-2 px-6 py-2 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800 transition shadow-lg font-bold"
           >
-            <Download size={18} /> 고해상도 인쇄 (PDF)
+            <Download size={18} /> 인쇄 (PDF)
+          </button>
+          <button 
+            onClick={() => setIsFormtecMode(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition shadow-md font-bold text-sm"
+          >
+            🏷️ 폼텍 라벨
           </button>
         </div>
       </header>
@@ -584,19 +737,52 @@ export default function Home() {
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                 </label>
               </div>
-              <button 
-                className="flex items-center justify-center gap-3 w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl hover:shadow-lg hover:shadow-indigo-100 transition-all font-bold group"
-                onClick={() => setIsAIModalOpen(true)}
-              >
-                <Sparkles size={16} className="text-white/80" />
-                <span className="text-sm">AI 테마 도안</span>
-              </button>
-              <button 
-                onClick={() => setIsGalleryOpen(true)}
-                className="flex items-center gap-3 w-full px-4 py-2.5 bg-gray-50 text-gray-700 rounded-2xl hover:bg-emerald-50 hover:text-emerald-700 transition-all font-bold text-xs"
-              >
-                <Layers size={16} className="text-gray-400" /> 디자인 보관함
-              </button>
+              {/* AI 스마트 디자인 (The Unified Brain) */}
+              <div className="pt-2">
+                <button
+                  onClick={() => setIsAiWizardOpen(true)}
+                  className="w-full flex flex-col items-center gap-3 p-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2.5rem] shadow-xl shadow-indigo-100 hover:shadow-2xl hover:-translate-y-1 transition-all group relative overflow-hidden text-white border-2 border-indigo-200"
+                >
+                  <div className="absolute top-0 left-0 w-full h-full bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Sparkles className="w-10 h-10 group-hover:scale-125 transition-transform duration-500" />
+                  <div className="text-center relative z-10">
+                    <span className="block text-lg font-black tracking-tight">AI 스마트 디자인</span>
+                    <span className="text-[11px] text-white/80 font-bold uppercase tracking-[0.2em]">Premium AI Artwork</span>
+                  </div>
+                  
+                  {/* Decorative Elements */}
+                  <div className="absolute -bottom-2 -right-2 text-white/10 rotate-12">
+                     <Palette size={60} />
+                  </div>
+                </button>
+              </div>
+              {/* Print Commander Masterpiece */}
+              <div className="space-y-3 pt-2">
+                <button 
+                  onClick={() => {
+                    const canvas = document.querySelector('canvas');
+                    if (canvas) {
+                      const link = document.createElement('a');
+                      link.download = `cardtoyou-print-${Date.now()}.png`;
+                      link.href = canvas.toDataURL('image/png', 2.0); // High quality
+                      link.click();
+                      alert('🎨 프린트용 고해상도 이미지가 저장되었습니다. 종이 규격에 맞춰 출력하세요!');
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-gradient-to-r from-gray-900 to-black text-white rounded-[2rem] hover:shadow-2xl hover:scale-[1.02] active:scale-95 transition-all font-black text-sm group"
+                >
+                  <Download size={20} className="group-hover:bounce" />
+                  <span>고해상도 이미지 저장 (출력용)</span>
+                </button>
+
+                <button 
+                  onClick={() => setIsGalleryOpen(true)}
+                  className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-white border-2 border-gray-100 text-gray-700 rounded-[2rem] hover:border-indigo-400 hover:text-indigo-600 transition-all font-black text-sm active:scale-95 shadow-sm"
+                >
+                  <Grid size={20} className="text-gray-400" />
+                  <span>커스텀 도안 갤러리</span>
+                </button>
+              </div>
             </div>
 
             {/* 2. Format Section (Accordion) */}
@@ -629,7 +815,12 @@ export default function Home() {
                             ? [Math.max(preset.widthMm, preset.heightMm), Math.min(preset.widthMm, preset.heightMm)]
                             : [Math.min(preset.widthMm, preset.heightMm), Math.max(preset.widthMm, preset.heightMm)];
                           setDimension({ widthMm: w, heightMm: h }, presetId);
-                          if (presetId.startsWith('formtec-')) setFoldType('none');
+                          if (presetId.startsWith('formtec-')) {
+                            setFoldType('none');
+                            setFormtecLabelType(presetId);
+                            setFormtecSelectedCells([]);
+                            setIsFormtecMode(true);
+                          }
                         }
                       }}
                       className="w-full p-2.5 bg-gray-50 border-none rounded-xl text-sm text-gray-800 focus:ring-2 focus:ring-indigo-500"
@@ -645,6 +836,31 @@ export default function Home() {
                         ))}
                       </optgroup>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-indigo-500 uppercase mb-1.5 ml-0.5">ORIENTATION</label>
+                    <div className="flex gap-2">
+                       <button
+                         onClick={() => {
+                           const d = currentDimension;
+                           setOrientation('landscape');
+                           setDimension({ widthMm: Math.max(d.widthMm, d.heightMm), heightMm: Math.min(d.widthMm, d.heightMm) }, selectedPresetId);
+                         }}
+                         className={`flex-1 py-2 text-[11px] font-bold rounded-xl transition ${orientation === 'landscape' ? 'bg-white border-2 border-indigo-600 text-indigo-600' : 'bg-gray-50 border-2 border-transparent text-gray-500 hover:bg-gray-100'}`}
+                       >
+                         가로형
+                       </button>
+                       <button
+                         onClick={() => {
+                           const d = currentDimension;
+                           setOrientation('portrait');
+                           setDimension({ widthMm: Math.min(d.widthMm, d.heightMm), heightMm: Math.max(d.widthMm, d.heightMm) }, selectedPresetId);
+                         }}
+                         className={`flex-1 py-2 text-[11px] font-bold rounded-xl transition ${orientation === 'portrait' ? 'bg-white border-2 border-indigo-600 text-indigo-600' : 'bg-gray-50 border-2 border-transparent text-gray-500 hover:bg-gray-100'}`}
+                       >
+                         세로형
+                       </button>
+                    </div>
                   </div>
 
                   <div>
@@ -681,7 +897,45 @@ export default function Home() {
               )}
             </div>
 
-            {/* 3. Inside Setting Section (Accordion) - Only if half fold & inside page */}
+            {/* 3. 추천 메시지 & 명언 라이브러리 (상시 노출) */}
+            <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
+              <button 
+                onClick={() => toggleSection('suggestions')}
+                className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
+                id="suggestions-accordion-header"
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} className="text-amber-500" />
+                  <span className="text-sm font-bold text-gray-700">추천 메시지 & 명언</span>
+                </div>
+                <div className={`transition-transform duration-300 ${expandedSections.includes('suggestions') ? 'rotate-180' : ''}`}>
+                  <ArrowDown size={14} className="text-gray-400" />
+                </div>
+              </button>
+              
+              {expandedSections.includes('suggestions') && (
+                <div className="px-4 pb-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => { setActiveSuggestionType('quote'); setIsSuggestionModalOpen(true); }}
+                      className="flex flex-col items-center justify-center gap-2 p-3 bg-amber-50 text-amber-700 border border-amber-100 rounded-2xl hover:bg-amber-100 transition font-bold text-[11px]"
+                    >
+                      <Sparkles size={16} className="text-amber-500" />
+                      <span>명언 샘플</span>
+                    </button>
+                    <button 
+                      onClick={() => { setActiveSuggestionType('message'); setIsSuggestionModalOpen(true); }}
+                      className="flex flex-col items-center justify-center gap-2 p-3 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-2xl hover:bg-indigo-100 transition font-bold text-[11px]"
+                    >
+                      <MessageSquareText size={16} className="text-indigo-500" />
+                      <span>메시지 샘플</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 4. Inside Setting Section (Accordion) - Only if half fold & inside page */}
             {activePage === 'inside' && foldType === 'half' && (
               <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white shadow-sm">
                 <button 
@@ -689,8 +943,8 @@ export default function Home() {
                   className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <MessageSquareText size={16} className="text-emerald-500" />
-                    <span className="text-sm font-bold text-gray-700">내지 편지 설정</span>
+                    <User size={16} className="text-emerald-500" />
+                    <span className="text-sm font-bold text-gray-700">수신인/발신인 설정</span>
                   </div>
                   <div className={`transition-transform duration-300 ${expandedSections.includes('inside_settings') ? 'rotate-180' : ''}`}>
                     <ArrowDown size={14} className="text-gray-400" />
@@ -699,20 +953,6 @@ export default function Home() {
                 
                 {expandedSections.includes('inside_settings') && (
                   <div className="px-4 pb-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="grid grid-cols-1 gap-2">
-                      <button 
-                        onClick={() => { setActiveSuggestionType('quote'); setIsSuggestionModalOpen(true); }}
-                        className="flex items-center gap-3 px-4 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-2xl hover:bg-emerald-100 transition font-bold text-xs"
-                      >
-                        <Sparkles size={14} className="text-emerald-500" /> 명언 라이브러리 (좌측)
-                      </button>
-                      <button 
-                        onClick={() => { setActiveSuggestionType('message'); setIsSuggestionModalOpen(true); }}
-                        className="flex items-center gap-3 px-4 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-2xl hover:bg-indigo-100 transition font-bold text-xs"
-                      >
-                        <MessageSquareText size={14} className="text-indigo-500" /> 추천 문구 (우측)
-                      </button>
-                    </div>
 
                     <div className="space-y-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
                       <div className="flex items-center justify-between">
@@ -784,7 +1024,9 @@ export default function Home() {
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-bold text-gray-400 uppercase">SIZE</label>
                           <input 
-                            type="number" value={selectedBlock.fontSize}
+                            type="number" 
+                            step="0.5"
+                            value={Number((selectedBlock.fontSize).toFixed(1))}
                             onChange={(e) => updateTextBlockContent(selectedBlock.id, { fontSize: Number(e.target.value) })}
                             className="w-full p-2.5 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                           />
@@ -824,6 +1066,26 @@ export default function Home() {
                           onChange={(e) => updateTextBlockContent(selectedBlock.id, { lineHeight: parseFloat(e.target.value) })}
                           className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                         />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase">ROTATION (회전)</label>
+                          <span className="text-[10px] font-bold text-blue-600">{Math.round(selectedBlock.rotation || 0)}°</span>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <input 
+                            type="range" min="-180" max="180" step="1" value={selectedBlock.rotation || 0}
+                            onChange={(e) => updateTextBlockContent(selectedBlock.id, { rotation: parseFloat(e.target.value) })}
+                            className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                          <button 
+                            onClick={() => updateTextBlockContent(selectedBlock.id, { rotation: 0 })}
+                            className="text-[10px] px-2 py-1 bg-gray-100 rounded text-gray-500 hover:bg-gray-200"
+                          >
+                            초기화
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-1.5">
@@ -1004,92 +1266,150 @@ export default function Home() {
           </div>
         </div>
 
-      {/* Design Gallery Modal */}
-      {isGalleryOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-emerald-50/30">
+      {/* Save Design Modal */}
+      {isSaveModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-indigo-50/30">
               <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Layers className="text-emerald-600" /> 내 디자인 보관함
+                <Save className="text-indigo-600" size={20} /> 디자인 저장
               </h3>
-              <button onClick={() => setIsGalleryOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+              <button 
+                onClick={() => setIsSaveModalOpen(false)} 
+                className="p-2 hover:bg-gray-100 rounded-full transition"
+              >
                 <X size={24} className="text-gray-400" />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-6">
-              {savedDesigns.length === 0 ? (
-                <div className="col-span-full py-20 text-center text-gray-400">
-                  아직 저장된 디자인이 없습니다.
-                </div>
-              ) : (
-                savedDesigns.map((design) => (
-                  <div 
-                    key={design.id} 
-                    className="group border border-gray-100 rounded-2xl overflow-hidden hover:border-emerald-500 hover:shadow-xl transition-all cursor-pointer relative"
-                    onClick={() => {
-                      loadDesign(design.id);
-                      setIsGalleryOpen(false);
-                    }}
-                  >
-                    <div className="aspect-video bg-gray-50 flex items-center justify-center overflow-hidden">
-                      {design.background_url ? (
-                        <img src={design.background_url} alt="preview" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                      ) : (
-                        <div className="text-xs text-gray-300">내용 없음</div>
-                      )}
-                    </div>
-                    <div className="p-4 bg-white">
-                      <div className="text-xs text-gray-400 mb-1">{new Date(design.created_at).toLocaleDateString()}</div>
-                      <div className="text-sm font-bold text-gray-700 truncate">{design.id.substring(0, 8)}...</div>
-                    </div>
-                    <div className="absolute inset-0 bg-emerald-600/0 group-hover:bg-emerald-600/10 transition-colors pointer-events-none" />
-                  </div>
-                ))
-              )}
+            
+            <div className="p-6">
+              <p className="text-sm text-gray-600 mb-4">
+                현재 디자인을 어떤 카테고리에 저장하시겠습니까?
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                {GALLERY_CATEGORIES.filter(c => c.id !== 'my_designs').map(category => (
+                   <button
+                     key={category.id}
+                     onClick={async () => {
+                       await saveDesign(category.id);
+                       setIsSaveModalOpen(false);
+                       alert('디자인이 성공적으로 저장되었습니다!');
+                     }}
+                     className="p-4 border border-gray-200 rounded-xl hover:border-indigo-500 hover:bg-indigo-50 transition text-left group"
+                   >
+                     <div className="font-bold text-gray-800 group-hover:text-indigo-700">{category.label}</div>
+                   </button>
+                ))}
+              </div>
+              
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={async () => {
+                    await saveDesign(); // No category string
+                    setIsSaveModalOpen(false);
+                    alert('미분류로 저장되었습니다.');
+                  }}
+                  className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition"
+                >
+                  분류 없이 그냥 저장하기
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* AI Theme Modal */}
-      {isAIModalOpen && (
+      {/* Design Gallery Modal */}
+      {isGalleryOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-indigo-50/30">
-              <div>
-                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Sparkles className="text-indigo-600 animate-pulse" /> AI 도안 자동 생성 (테마)
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">원하는 분위기를 선택하면 AI가 배경과 조화로운 폰트를 설정해줍니다.</p>
-              </div>
-              <button onClick={() => setIsAIModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+          <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-emerald-50/30">
+              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Layers className="text-emerald-600" /> 디자인 보관함 & 무료 템플릿
+              </h3>
+              <button onClick={() => setIsGalleryOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
                 <X size={24} className="text-gray-400" />
               </button>
             </div>
-            <div className="p-8 grid grid-cols-2 gap-4">
-              {[
-                { name: '로맨틱 핑크', desc: '사랑스러운 분위기', bg: '/themes/romantic_pink.png', text: 'To my Darling', subText: 'You make my world brighter', color: 'from-pink-100 to-rose-200' },
-                { name: '모던 화이트', desc: '깔끔하고 정돈된 느낌', bg: '/themes/modern_white.png', text: 'Simplicity', subText: 'The ultimate sophistication', color: 'from-slate-50 to-gray-200' },
-                { name: '빈티지 리프', desc: '자연스럽고 편안함', bg: '/themes/vintage_leaf.png', text: 'Thank You', subText: 'For your endless support', color: 'from-green-50 to-emerald-200' },
-                { name: '차분한 블루', desc: '신뢰와 평온함', bg: '/themes/calm_blue.png', text: 'Stay Calm', subText: 'Peace begins with a smile', color: 'from-blue-50 to-indigo-200' },
-              ].map((theme) => (
-                <button 
-                  key={theme.name}
-                  onClick={() => handleApplyTheme(theme)}
-                  className="flex flex-col items-start p-6 rounded-2xl border border-gray-100 hover:border-indigo-500 hover:shadow-lg transition-all text-left bg-white group"
-                >
-                  <img src={theme.bg} alt={theme.name} className="w-full aspect-video rounded-xl mb-4 object-cover shadow-inner group-hover:scale-105 transition-transform duration-300" />
-                  <div className="font-bold text-gray-800">{theme.name}</div>
-                  <div className="text-xs text-gray-500">{theme.desc}</div>
-                </button>
-              ))}
-            </div>
-            <div className="p-6 bg-gray-50 flex justify-end">
-              <p className="text-[10px] text-gray-400 italic">AI 생성 시 1건당 API 호출 비용이 발생할 수 있습니다.</p>
+            
+            <div className="flex flex-1 overflow-hidden">
+              {/* Sidebar Tabs */}
+              <aside className="w-56 bg-gray-50/50 border-r border-gray-100 p-4 shrink-0 overflow-y-auto">
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">보관함 & 테마</label>
+                <div className="flex flex-col gap-1">
+                  {GALLERY_CATEGORIES.map(category => (
+                    <button
+                      key={category.id}
+                      onClick={() => setActiveGalleryTab(category.id)}
+                      className={`px-4 py-3 text-left text-sm font-bold rounded-xl transition-all flex items-center justify-between ${activeGalleryTab === category.id ? 'bg-white shadow-md text-emerald-600 border border-emerald-100' : 'text-gray-500 hover:bg-white/50 hover:text-gray-700'}`}
+                    >
+                      <span>{category.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </aside>
+
+              {/* Gallery Grid */}
+              <div className="flex-1 p-6 overflow-y-auto bg-gray-50">
+                {activeGalleryTab === 'my_designs' ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                    {savedDesigns.length === 0 ? (
+                      <div className="col-span-full py-20 text-center text-gray-400">
+                        아직 저장된 디자인이 없습니다.
+                      </div>
+                    ) : (
+                      savedDesigns.map((design) => (
+                        <div 
+                          key={design.id} 
+                          className="group bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-emerald-500 hover:shadow-xl transition-all cursor-pointer relative"
+                          onClick={() => {
+                            loadDesign(design.id);
+                            setIsGalleryOpen(false);
+                          }}
+                        >
+                          <div className="aspect-video bg-gray-50 flex items-center justify-center overflow-hidden">
+                            {design.background_url ? (
+                              <img src={design.background_url} alt="preview" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                            ) : (
+                              <div className="text-xs text-gray-300">내용 없음</div>
+                            )}
+                          </div>
+                          <div className="p-4 bg-white">
+                            <div className="text-xs text-gray-400 mb-1">{new Date(design.created_at).toLocaleDateString()}</div>
+                            <div className="text-sm font-bold text-gray-700 truncate">{design.id.substring(0, 8)}...</div>
+                          </div>
+                          <div className="absolute inset-0 bg-emerald-600/0 group-hover:bg-emerald-600/10 transition-colors pointer-events-none" />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {FREE_TEMPLATES[activeGalleryTab]?.map((url, index) => (
+                      <div 
+                        key={index} 
+                        className="group bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-emerald-500 hover:shadow-xl transition-all cursor-pointer relative"
+                        onClick={() => loadTemplate(url, activeGalleryTab)}
+                      >
+                        <div className="aspect-[3/4] bg-gray-50 flex items-center justify-center overflow-hidden">
+                          <img src={url} alt={`Template ${index+1}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" />
+                        </div>
+                        <div className="absolute inset-0 bg-emerald-600/0 group-hover:bg-emerald-600/10 transition-colors pointer-events-none" />
+                        <div className="absolute bottom-3 right-3 bg-black/50 text-white text-[10px] px-3 py-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md font-bold">
+                          적용하기
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
+
+
 
       {/* Message Suggestion Modal */}
       {isSuggestionModalOpen && (
@@ -1196,6 +1516,9 @@ export default function Home() {
                               lineHeight: 1.6
                             });
                             setSuggestedQuoteBlockId(id);
+                            
+                            // 내지로 화면 전환하여 확인 유도
+                            setActivePage('inside');
                           } else {
                             if (isFolding) {
                               if (isLandscape) {
@@ -1226,6 +1549,9 @@ export default function Home() {
                               lineHeight: 1.6
                             });
                             setSuggestedMessageBlockId(id);
+                            
+                            // 내지로 화면 전환하여 확인 유도
+                            setActivePage('inside');
                           }
                           setIsSuggestionModalOpen(false);
                         }}
@@ -1360,7 +1686,6 @@ export default function Home() {
               <button 
                 onClick={() => {
                    setIsShopSettingsOpen(false);
-                   // Apply immediately if needed, or just let user click apply in sidebar
                 }}
                 className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
               >
@@ -1369,6 +1694,117 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 통합 AI 스마트 디자인 모달 */}
+      {isAiWizardOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsAiWizardOpen(false)} />
+          <div className="relative bg-white w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
+            {/* 헤더 */}
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-8 text-white relative">
+              <button 
+                onClick={() => setIsAiWizardOpen(false)}
+                className="absolute top-6 right-6 p-2 hover:bg-white/10 rounded-full transition-colors"
+                title="닫기"
+              >
+                <X size={20} />
+              </button>
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="animate-pulse" size={24} />
+                <h2 className="text-2xl font-black">AI 스마트 디자인</h2>
+              </div>
+              <p className="text-white/80 text-sm font-medium">단 한 번의 터치로 표지 이미지를 완성합니다.</p>
+            </div>
+
+            <div className="p-8 space-y-6">
+              {/* 테마 프리셋 */}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-3 tracking-widest">스타일 프리셋</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'romantic', label: '💖 로맨틱', color: 'bg-pink-50 text-pink-700 border-pink-100' },
+                    { id: 'modern', label: '🏢 모던/심플', color: 'bg-slate-50 text-slate-700 border-slate-100' },
+                    { id: 'vibrant', label: '🌈 비비드', color: 'bg-amber-50 text-amber-700 border-amber-100' },
+                    { id: 'calm', label: '🌿 감성/차분', color: 'bg-emerald-50 text-emerald-700 border-emerald-100' }
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => handleAISmartDesign(t.label.split(' ')[1])}
+                      className={`p-3 rounded-xl border text-sm font-bold transition-all hover:scale-105 active:scale-95 ${t.color}`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-gray-100"></span>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white px-3 text-gray-400 font-bold uppercase tracking-tighter">OR</span>
+                </div>
+              </div>
+
+              {/* 커스텀 프롬프트 */}
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-2">원하는 느낌을 직접 입력</label>
+                <textarea 
+                  value={aiThemePrompt} 
+                  onChange={e => setAiThemePrompt(e.target.value)}
+                  placeholder="예: '수채화 풍의 장미 정원', '추상적인 기하학 패턴', '어린이가 그린 것 같은 낙서 스타일'"
+                  className="w-full p-4 border border-gray-200 rounded-2xl text-sm h-32 resize-none focus:ring-2 focus:ring-indigo-400 outline-none transition-all placeholder:text-gray-300"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleAISmartDesign()}
+                disabled={isGenerating}
+                className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl font-bold text-lg hover:shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 active:scale-95"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    디자인 설계 중...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={20} /> 프리미엄 디자인 생성
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* === 폼텍 인쇄 모달 === */}
+      {isFormtecMode && (
+        <FormtecModal 
+          isOpen={isFormtecMode} 
+          onClose={() => setIsFormtecMode(false)}
+          config={LABEL_CONFIGS[formtecLabelType]}
+          formtecLabelType={formtecLabelType}
+          formtecSelectedCells={formtecSelectedCells}
+          setFormtecSelectedCells={setFormtecSelectedCells}
+          formtecMessage={formtecMessage}
+          setFormtecMessage={setFormtecMessage}
+          formtecFontSize={formtecFontSize}
+          setFormtecFontSize={setFormtecFontSize}
+          formtecIsBold={formtecIsBold}
+          setFormtecIsBold={setFormtecIsBold}
+          formtecTextAlign={formtecTextAlign}
+          setFormtecTextAlign={setFormtecTextAlign}
+          formtecBgColor={formtecBgColor}
+          setFormtecBgColor={setFormtecBgColor}
+          formtecTextColor={formtecTextColor}
+          setFormtecTextColor={setFormtecTextColor}
+          onPrint={handleFormtecPrint}
+          isGenerating={isGenerating}
+          setIsGenerating={setIsGenerating}
+        />
       )}
 
       {/* Loading Overlay */}
@@ -1385,5 +1821,131 @@ export default function Home() {
         </div>
       )}
     </main>
+  );
+}
+
+// === 하위 컴포넌트: 폼텍 모달 (파싱 에러 방지를 위해 분리) ===
+function FormtecModal({ 
+  isOpen, onClose, config, formtecLabelType, formtecSelectedCells, setFormtecSelectedCells,
+  formtecMessage, setFormtecMessage, formtecFontSize, setFormtecFontSize,
+  formtecIsBold, setFormtecIsBold, formtecTextAlign, setFormtecTextAlign,
+  formtecBgColor, setFormtecBgColor, formtecTextColor, setFormtecTextColor,
+  onPrint, isGenerating, setIsGenerating
+}: any) {
+  if (!isOpen) return null;
+  const rows = config ? Math.ceil(config.cells / config.cols) : 1;
+  const cols = config ? config.cols : 1;
+  const totalCells = config ? config.cells : 1;
+  
+  const toggleCell = (idx: number) => {
+    setFormtecSelectedCells((prev: any) => 
+      prev.includes(idx) ? prev.filter((c: any) => c !== idx) : [...prev, idx]
+    );
+  };
+  const selectAll = () => setFormtecSelectedCells(Array.from({length: totalCells}, (_, i) => i));
+  const clearAll = () => setFormtecSelectedCells([]);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300 max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="p-5 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50 shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              🏷️ {PAPER_PRESETS.find(p => p.id === formtecLabelType)?.label || '라벨'} 인쇄
+            </h3>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition">
+              <X size={24} className="text-gray-400" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">인쇄할 위치를 클릭하여 선택하세요</p>
+        </div>
+        
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* 그리드 선택기 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-gray-600">
+                인쇄 위치 선택 <span className="text-emerald-600">({formtecSelectedCells.length}/{totalCells})</span>
+              </label>
+              <div className="flex gap-2">
+                <button onClick={selectAll} className="text-[10px] px-2 py-1 bg-emerald-50 text-emerald-700 rounded-md font-bold">전체 선택</button>
+                <button onClick={clearAll} className="text-[10px] px-2 py-1 bg-gray-50 text-gray-500 rounded-md font-bold">전체 해제</button>
+              </div>
+            </div>
+            
+            <div className="bg-gray-50 rounded-2xl p-3 border border-gray-200">
+              <div 
+                className="bg-white rounded-lg border border-gray-300 mx-auto shadow-sm overflow-hidden"
+                style={{ aspectRatio: '210/297', maxHeight: '300px' }}
+              >
+                <div 
+                  className="grid h-full w-full p-2"
+                  style={{ 
+                    gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                    gridTemplateRows: `repeat(${rows}, 1fr)`,
+                    gap: '2px'
+                  }}
+                >
+                  {Array.from({length: totalCells}).map((_, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => toggleCell(idx)}
+                      className={`rounded border transition-all flex items-center justify-center text-[9px] ${
+                        formtecSelectedCells.includes(idx) ? 'bg-emerald-500 text-white border-emerald-600' : 'bg-white text-gray-300 border-gray-100'
+                      }`}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 메시지 입력 */}
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-2">인쇄 메시지</label>
+            <textarea 
+              value={formtecMessage}
+              onChange={e => setFormtecMessage(e.target.value)}
+              className="w-full p-3 border border-gray-200 rounded-xl text-sm h-20 outline-none focus:ring-2 focus:ring-emerald-400"
+              placeholder="내용을 입력하세요..."
+            />
+          </div>
+
+          {/* 스타일 조절 */}
+          <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-xl">
+             <div className="flex items-center gap-2 border-r pr-3">
+                <button onClick={() => setFormtecFontSize(Math.max(8, formtecFontSize-1))}><Minus size={16}/></button>
+                <span className="text-xs font-bold w-4 text-center">{formtecFontSize}</span>
+                <button onClick={() => setFormtecFontSize(Math.min(72, formtecFontSize+1))}><Plus size={16}/></button>
+             </div>
+             <button 
+              onClick={() => setFormtecIsBold(!formtecIsBold)}
+              className={`p-1.5 rounded ${formtecIsBold ? 'bg-emerald-100 text-emerald-600' : ''}`}
+             >
+                <Bold size={16} />
+             </button>
+             <div className="flex gap-1">
+                {(['left', 'center', 'right'] as const).map(a => (
+                  <button key={a} onClick={() => setFormtecTextAlign(a)} className={`p-1.5 rounded ${formtecTextAlign === a ? 'bg-emerald-100' : ''}`}>
+                    {a === 'left' ? <AlignLeft size={16}/> : a === 'center' ? <AlignCenter size={16}/> : <AlignRight size={16}/>}
+                  </button>
+                ))}
+             </div>
+          </div>
+
+          {/* 인쇄 실행 */}
+          <button
+            onClick={onPrint}
+            disabled={!formtecMessage.trim() || formtecSelectedCells.length === 0 || isGenerating}
+            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all disabled:opacity-50"
+          >
+            🖨️ {formtecSelectedCells.length}개 라벨 인쇄하기
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

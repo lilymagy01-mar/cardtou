@@ -211,7 +211,7 @@ export const MESSAGE_SUGGESTIONS: ContentSuggestion[] = [
   { id: 'm-ach-4', category: 'achievement', lang: 'ko', content: '당신의 성공은 우연이 아닙니다. 매일 밤낮으로 노력한 결과임을 잘 알고 있어요. 축하합니다!' },
   { id: 'm-ach-4e', category: 'achievement', lang: 'en', content: 'Your success is no coincidence. I know well it’s the result of your day and night effort. Congratulations!' },
   { id: 'm-ach-5', category: 'achievement', lang: 'ko', content: '리더로서 새로운 발걸음을 떼는 당신을 응원합니다. 이 꽃들처럼 향기로운 팀을 만들어가세요.' },
-  { id: 'm-ach-5e', achievement: 'achievement', lang: 'en', content: 'Cheering for you as you take a new step as a leader. Create a fragrant team like these flowers.' },
+  { id: 'm-ach-5e', category: 'achievement', lang: 'en', content: 'Cheering for you as you take a new step as a leader. Create a fragrant team like these flowers.' },
   { id: 'm-ach-6', category: 'achievement', lang: 'ko', content: '커리어의 빛나는 순간을 함께 축하할 수 있어 기쁩니다. 앞으로 더 높이 비상하시길.' },
   { id: 'm-ach-6e', category: 'achievement', lang: 'en', content: 'Glad to celebrate this shining moment of your career together. May you soar even higher ahead.' },
   { id: 'm-ach-7', category: 'achievement', lang: 'ko', content: '어려운 프로젝트를 성공적으로 마친 공로를 높이 평가합니다. 정말 수고 많으셨습니다!' },

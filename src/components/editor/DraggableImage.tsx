@@ -86,7 +86,8 @@ export const DraggableImage: React.FC<DraggableImageProps> = ({
     justifyContent: 'center',
     userSelect: 'none',
     boxSizing: 'content-box',
-    overflow: 'visible'
+    overflow: 'visible',
+    zIndex: 50
   };
 
   return (

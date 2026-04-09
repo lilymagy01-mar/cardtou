@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { supabase } from '@/lib/supabaseClient';
 export interface TextBlock {
   id: string;
@@ -15,6 +16,7 @@ export interface TextBlock {
   width?: number; // 가로 너비 (mm)
   lineHeight?: number; // 줄 간격 (기본 1.0)
   rotation?: number; // 회전 (도)
+  textShadow?: string; // CSS 텍스트 그림자 속성
 }
 
 export interface ImageBlock {
@@ -121,7 +123,7 @@ interface EditorState {
   removeImageBlock: (id: string) => void;
   
   setSelectedBlockId: (id: string | null) => void;
-  saveDesign: () => Promise<void>;
+  saveDesign: (category?: string) => Promise<void>;
   loadDesign: (id?: string) => Promise<void>;
   listDesigns: () => Promise<any[]>;
   setDesignId: (id: string | null) => void;
@@ -131,7 +133,9 @@ interface EditorState {
   applyShopBranding: (target: 'front' | 'back') => void;
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>()(
+  persist(
+    (set, get) => ({
   // 기본 카드 형태: 가로형 폴딩 (A5 Landscape: 210x148mm)
   currentDimension: { widthMm: 210, heightMm: 148 },
   selectedPresetId: 'a5',
@@ -192,34 +196,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get();
     if (state.activePage === page) return;
 
-    // 현재 페이지 데이터를 pages 객체에 저장
-    const currentData: PageData = {
-      backgroundUrl: state.backgroundUrl,
-      frontBackgroundUrl: state.frontBackgroundUrl,
-      backBackgroundUrl: state.backBackgroundUrl,
-      textBlocks: state.textBlocks,
-      imageBlocks: state.imageBlocks,
-      margins: state.margins
-    };
-
+    // 1. 현재 페이지의 상태(텍스트/이미지 블록 등)를 pages 객체에 저장
     const updatedPages = {
       ...state.pages,
-      [state.activePage]: currentData
+      [state.activePage]: {
+        ...state.pages[state.activePage],
+        backgroundUrl: state.backgroundUrl,
+        frontBackgroundUrl: state.frontBackgroundUrl,
+        backBackgroundUrl: state.backBackgroundUrl,
+        textBlocks: state.textBlocks,
+        imageBlocks: state.imageBlocks,
+        margins: state.margins
+      }
     };
 
-    // 목적지 페이지 데이터를 현재 상태로 로드
+    // 2. 목적지 페이지 데이터를 로드
     const targetData = updatedPages[page];
 
     set({
       activePage: page,
       pages: updatedPages,
+      // 배경 정보는 유실 방지를 위해 targetData에 값이 있을 때만 명시적으로 로드하거나 
+      // 폴딩형의 경우 front/back은 전역성을 띄도록 유지
       backgroundUrl: targetData.backgroundUrl || null,
-      frontBackgroundUrl: targetData.frontBackgroundUrl || null,
-      backBackgroundUrl: targetData.backBackgroundUrl || null,
+      frontBackgroundUrl: targetData.frontBackgroundUrl || state.frontBackgroundUrl || null,
+      backBackgroundUrl: targetData.backBackgroundUrl || state.backBackgroundUrl || null,
       textBlocks: targetData.textBlocks,
       imageBlocks: targetData.imageBlocks,
       margins: targetData.margins || { top: 10, right: 10, bottom: 10, left: 10 },
-      selectedBlockId: null // 페이지 전환 시 선택 해제
+      selectedBlockId: null
     });
   },
 
@@ -573,7 +578,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setSelectedBlockId: (id) => set({ selectedBlockId: id }),
 
-  saveDesign: async () => {
+  saveDesign: async (category?: string) => {
     const state = get();
     
     // 현재 작업 중인 페이지 데이터를 pages에 최종 업데이트
@@ -589,7 +594,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     };
 
-    const data = {
+    const data: Record<string, unknown> = {
       dimension: state.currentDimension,
       orientation: state.orientation,
       fold_type: state.foldType,
@@ -598,6 +603,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       image_blocks: updatedPages.outside.imageBlocks,    // 추가
       pages: updatedPages
     };
+
+    // 샘플리(Template Curator): 카테고리 태그 저장
+    if (category) {
+      data.category = category;
+    }
 
     if (state.designId) {
       const { error } = await supabase.from('card_designs').update(data).eq('id', state.designId);
@@ -691,6 +701,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       currentDimension, 
       orientation, 
       foldType,
+      margins,
       addTextBlock,
       addImageBlock,
       setActivePage 
@@ -703,31 +714,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const isFolding = foldType === 'half';
     const { widthMm, heightMm } = currentDimension;
     
+    // 각도기(Layout Architect): 마진 안전 영역 기반 좌표 산출
     let baseX = widthMm / 2;
-    let baseY = heightMm - 20;
+    let baseY = heightMm - margins.bottom - 8; // 하드코딩 대신 마진 반영
     let rotation = 0;
 
     if (isFolding) {
       if (isLandscape) {
         // 가로형: 좌측(Back), 우측(Front)
         baseX = (target === 'front') ? (widthMm * 0.75) : (widthMm * 0.25);
-        baseY = heightMm - 20;
+        baseY = heightMm - margins.bottom - 8;
         rotation = 0;
       } else {
         // 세로형: 상단(Back), 하단(Front)
         baseX = widthMm / 2;
         if (target === 'front') {
-          baseY = heightMm * 0.75 + 10;
+          baseY = heightMm - margins.bottom - 8;
           rotation = 0;
         } else {
-          baseY = heightMm * 0.25 - 10;
+          baseY = margins.top + 8;
           rotation = 180; // 뒷면은 뒤집혀야 함
         }
       }
     } else {
       // 접지 없음 (단면/엽서 등)
       baseX = widthMm / 2;
-      baseY = heightMm - 20;
+      baseY = heightMm - margins.bottom - 8;
       rotation = 0;
     }
 
@@ -738,7 +750,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         x: baseX,
         y: baseY - 15, // 텍스트 위에 배치
         width: 30,
-        height: 10,
+        height: 15,
         isPrintable: true,
         rotation
       });
@@ -774,4 +786,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       } as any);
     }
   }
-}));
+}),
+{
+    name: 'cardtou-editor-storage',
+    partialize: (state) => ({ shopSettings: state.shopSettings }),
+  }
+));

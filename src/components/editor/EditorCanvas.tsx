@@ -1,7 +1,13 @@
 'use client';
 
 import React from 'react';
-import { DndContext, DragEndEvent } from '@dnd-kit/core';
+import { 
+  DndContext, 
+  DragEndEvent, 
+  useSensor, 
+  useSensors, 
+  PointerSensor 
+} from '@dnd-kit/core';
 import { useEditorStore } from '@/store/useEditorStore';
 import { DraggableText } from './DraggableText';
 import { DraggableImage } from './DraggableImage';
@@ -101,13 +107,22 @@ export const EditorCanvas: React.FC = () => {
 
   const isLandscape = orientation === 'landscape';
 
+  // Add sensor to distinguish clicks from drags (solves hard selection issue)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5, // minimum 5px move before a drag starts
+      },
+    })
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <div 
         ref={containerRef}
         className="flex-1 w-full flex justify-center items-center p-8 bg-gray-100 rounded-lg shadow-inner overflow-auto h-full min-h-0"
       >
-        <DndContext onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <div
             onClick={() => useEditorStore.getState().setSelectedBlockId(null)}
             style={{
@@ -123,23 +138,37 @@ export const EditorCanvas: React.FC = () => {
             {/* Background Layers */}
             <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', flexDirection: isLandscape ? 'row' : 'column' }}>
               {foldType === 'half' ? (
-                <>
+                // 접이식 카드
+                activePage === 'outside' ? (
+                  // 표지: 실제 앞면/뒷면 배경 출력
+                  <>
+                    <div style={{ 
+                      flex: 1, 
+                      backgroundImage: backBackgroundUrl ? `url(${backBackgroundUrl})` : undefined, 
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      borderRight: isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none',
+                      borderBottom: !isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none'
+                    }} />
+                    <div style={{ 
+                      flex: 1, 
+                      backgroundImage: frontBackgroundUrl ? `url(${frontBackgroundUrl})` : undefined, 
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center'
+                    }} />
+                  </>
+                ) : (
+                  // 내지: 깨끗한 배경 혹은 내지용 배경(backgroundUrl) 출력
                   <div style={{ 
                     flex: 1, 
-                    backgroundImage: backBackgroundUrl ? `url(${backBackgroundUrl})` : undefined, 
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    borderRight: isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none',
-                    borderBottom: !isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none'
-                  }} />
-                  <div style={{ 
-                    flex: 1, 
-                    backgroundImage: frontBackgroundUrl ? `url(${frontBackgroundUrl})` : undefined, 
+                    backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : 'none',
+                    backgroundColor: backgroundUrl ? 'transparent' : '#ffffff',
                     backgroundSize: 'cover',
                     backgroundPosition: 'center'
                   }} />
-                </>
+                )
               ) : (
+                // 일반 카드 (Flat)
                 <div style={{ 
                   flex: 1, 
                   backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined, 

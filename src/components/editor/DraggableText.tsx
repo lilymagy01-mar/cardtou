@@ -12,7 +12,7 @@ interface DraggableTextProps extends TextBlock {
 }
 
 export const DraggableText: React.FC<DraggableTextProps> = (props) => {
-  const { id, text, x, y, fontSize, colorHex, fontFamily, textAlign, zIndex, isSelected, zoom, rotation } = props;
+  const { id, text, x, y, fontSize, colorHex, fontFamily, textAlign, zIndex, isSelected, zoom, rotation, textShadow } = props;
   const { setSelectedBlockId, removeTextBlock } = useEditorStore();
 
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
@@ -37,13 +37,14 @@ export const DraggableText: React.FC<DraggableTextProps> = (props) => {
     color: colorHex,
     fontSize: `${fontSize * (zoom / 3)}px`, // Match the mm scaling (3px per mm)
     fontFamily: fontFamily || 'sans-serif',
+    textShadow: textShadow,
     whiteSpace: 'pre-wrap',
     cursor: props.isLocked ? 'default' : 'grab',
     userSelect: 'none',
     opacity: props.opacity ?? 1,
     padding: '4px',
     border: transform ? `${2 * (zoom / 3)}px dashed #3b82f6` : (isSelected ? `${2 * (zoom / 3)}px solid #3b82f6` : '1px solid transparent'),
-    width: props.width ? `${props.width * zoom}px` : undefined,
+    width: props.width ? `${props.width * zoom}px` : 'max-content',
     lineHeight: props.lineHeight ?? 1.6,
     wordBreak: 'keep-all',
     minWidth: '20px',
