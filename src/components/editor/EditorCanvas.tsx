@@ -11,7 +11,7 @@ import {
 import { useEditorStore } from '@/store/useEditorStore';
 import { DraggableText } from './DraggableText';
 import { DraggableImage } from './DraggableImage';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Sparkles } from 'lucide-react';
 
 export const EditorCanvas: React.FC = () => {
   const { 
@@ -32,7 +32,8 @@ export const EditorCanvas: React.FC = () => {
     orientation,
     activePage,
     removeTextBlock,
-    removeImageBlock
+    removeImageBlock,
+    isGenerating // 추가: 구조 분해 할당으로 꺼내오기
   } = useEditorStore();
 
   const [contextMenu, setContextMenu] = React.useState<{
@@ -136,7 +137,7 @@ export const EditorCanvas: React.FC = () => {
             className="ring-1 ring-gray-200"
           >
             {/* Background Layers */}
-            <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', flexDirection: isLandscape ? 'row' : 'column' }}>
+            <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', flexDirection: isLandscape ? 'row' : 'column', backgroundColor: '#ffffff' }}>
               {foldType === 'half' ? (
                 // 접이식 카드
                 activePage === 'outside' ? (
@@ -144,24 +145,34 @@ export const EditorCanvas: React.FC = () => {
                   <>
                     <div style={{ 
                       flex: 1, 
-                      backgroundImage: backBackgroundUrl ? `url(${backBackgroundUrl})` : undefined, 
+                      backgroundImage: backBackgroundUrl ? `url('${backBackgroundUrl}')` : undefined, 
                       backgroundSize: 'cover',
                       backgroundPosition: 'center',
+                      backgroundColor: '#f8fafc',
                       borderRight: isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none',
                       borderBottom: !isLandscape ? '0.5px solid rgba(0,0,0,0.05)' : 'none'
                     }} />
                     <div style={{ 
                       flex: 1, 
-                      backgroundImage: frontBackgroundUrl ? `url(${frontBackgroundUrl})` : undefined, 
+                      backgroundImage: frontBackgroundUrl ? `url('${frontBackgroundUrl}')` : undefined, 
                       backgroundSize: 'cover',
-                      backgroundPosition: 'center'
-                    }} />
+                      backgroundPosition: 'center',
+                      backgroundColor: '#f1f5f9',
+                      position: 'relative'
+                    }}>
+                      {/* Loading Overlay for AI Generation */}
+                      {!frontBackgroundUrl && (
+                        <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-gray-300 uppercase tracking-tighter">
+                          Front Cover
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : (
                   // 내지: 깨끗한 배경 혹은 내지용 배경(backgroundUrl) 출력
                   <div style={{ 
                     flex: 1, 
-                    backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : 'none',
+                    backgroundImage: backgroundUrl ? `url('${backgroundUrl}')` : 'none',
                     backgroundColor: backgroundUrl ? 'transparent' : '#ffffff',
                     backgroundSize: 'cover',
                     backgroundPosition: 'center'
@@ -171,9 +182,10 @@ export const EditorCanvas: React.FC = () => {
                 // 일반 카드 (Flat)
                 <div style={{ 
                   flex: 1, 
-                  backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined, 
+                  backgroundImage: backgroundUrl ? `url('${backgroundUrl}')` : undefined, 
                   backgroundSize: 'cover',
-                  backgroundPosition: 'center'
+                  backgroundPosition: 'center',
+                  backgroundColor: '#f8fafc'
                 }} />
               )}
             </div>
@@ -261,6 +273,22 @@ export const EditorCanvas: React.FC = () => {
                   zIndex: 5
                 }}
               />
+            )}
+
+            {/* AI Generation Loading Overlay - Improved Visual Feedback */}
+            {isGenerating && (
+              <div className="absolute inset-0 z-[100] bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center animate-in fade-in duration-300">
+                <div className="relative">
+                  <div className="w-16 h-16 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Sparkles className="text-indigo-600 animate-pulse" size={24} />
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-col items-center gap-1">
+                  <p className="text-sm font-black text-indigo-900 tracking-tighter animate-bounce">AI 아티스트가 그리는 중...</p>
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest opacity-60">Masterpiece in progress</p>
+                </div>
+              </div>
             )}
           </div>
         </DndContext>

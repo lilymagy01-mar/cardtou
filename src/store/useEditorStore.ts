@@ -91,11 +91,13 @@ interface EditorState {
   suggestedMessageBlockId: string | null;
   suggestedQuoteBlockId: string | null;
   zoom: number;
+  isGenerating: boolean; // 추가: AI 생성 상태 전역 관리
 
   shopSettings: ShopSettings;
 
   // Actions
   setZoom: (zoom: number) => void;
+  setIsGenerating: (is: boolean) => void; // 추가
   setRecipientName: (name: string) => void;
   setSenderName: (name: string) => void;
   setShowToField: (show: boolean) => void;
@@ -189,8 +191,10 @@ export const useEditorStore = create<EditorState>()(
   suggestedMessageBlockId: null,
   suggestedQuoteBlockId: null,
   zoom: 3.0,
+  isGenerating: false,
 
   setZoom: (zoom) => set({ zoom }),
+  setIsGenerating: (is) => set({ isGenerating: is }),
 
   setActivePage: (page) => {
     const state = get();
