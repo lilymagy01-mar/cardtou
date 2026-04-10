@@ -31,14 +31,27 @@ export const DraggableImage: React.FC<DraggableImageProps> = ({
   rotation,
   onContextMenu
 }) => {
-  const { updateImageBlockPosition, setSelectedBlockId, removeImageBlock } = useEditorStore();
+  const { 
+    updateImageBlockPosition, 
+    setSelectedBlockId, 
+    toggleBlockSelection,
+    selectedBlockIds,
+    moveSelectedBlocks,
+    removeImageBlock 
+  } = useEditorStore();
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    if (e.shiftKey) {
+      toggleBlockSelection(id);
+    } else {
+      setSelectedBlockId(id);
+    }
+
     setIsDragging(true);
-    setSelectedBlockId(id);
     dragStartRef.current = {
       x: e.clientX - x * zoom,
       y: e.clientY - y * zoom,
@@ -48,10 +61,17 @@ export const DraggableImage: React.FC<DraggableImageProps> = ({
   const handleMouseMove = (e: MouseEvent) => {
     if (!isDragging) return;
 
-    const newX = (e.clientX - dragStartRef.current.x) / zoom;
-    const newY = (e.clientY - dragStartRef.current.y) / zoom;
+    const currentX = (e.clientX - dragStartRef.current.x) / zoom;
+    const currentY = (e.clientY - dragStartRef.current.y) / zoom;
     
-    updateImageBlockPosition(id, newX, newY);
+    const dx = currentX - x;
+    const dy = currentY - y;
+    
+    if (selectedBlockIds.includes(id)) {
+      moveSelectedBlocks(dx, dy);
+    } else {
+      updateImageBlockPosition(id, currentX, currentY);
+    }
   };
 
   const handleMouseUp = () => {
@@ -80,7 +100,8 @@ export const DraggableImage: React.FC<DraggableImageProps> = ({
     height: `${height * zoom}px`,
     cursor: isDragging ? 'grabbing' : 'grab',
     border: isSelected ? '2px solid #3b82f6' : '1px dashed transparent',
-    transform: `translate(-50%, -50%) rotate(${rotation || 0}deg)`, // Center based on x,y and rotate
+    transform: `rotate(${rotation || 0}deg)`, // Top-left origin, but still rotate around center
+    transformOrigin: 'center center',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

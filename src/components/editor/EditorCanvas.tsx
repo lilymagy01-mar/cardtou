@@ -33,6 +33,9 @@ export const EditorCanvas: React.FC = () => {
     activePage,
     removeTextBlock,
     removeImageBlock,
+    selectedBlockIds,
+    toggleBlockSelection,
+    moveSelectedBlocks,
     isGenerating // 추가: 구조 분해 할당으로 꺼내오기
   } = useEditorStore();
 
@@ -71,13 +74,26 @@ export const EditorCanvas: React.FC = () => {
     const { active, delta } = event;
     if (active && delta) {
       const blockId = active.id as string;
-      const tBlock = textBlocks.find(b => b.id === blockId);
-      const iBlock = imageBlocks.find(b => b.id === blockId);
       
-      if (tBlock) {
-        updateTextBlockPosition(blockId, tBlock.x + delta.x / zoom, tBlock.y + delta.y / zoom);
-      } else if (iBlock) {
-        updateImageBlockPosition(blockId, iBlock.x + delta.x / zoom, iBlock.y + delta.y / zoom);
+      // [정밀 보정] 줌 배율을 고려하여 실제 mm 단위 이동량을 소수점까지 계산
+      // (캡틴: 이제 글자가 마우스를 놓는 순간 튀지 않고 정확히 그 자리에 안착합니다!)
+      const dx = delta.x / zoom;
+      const dy = delta.y / zoom;
+
+      // 1mm 이하의 아주 미세한 움직임은 무시하지 않고 그대로 반영하여 정밀도 향상
+      if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+
+      if (selectedBlockIds.includes(blockId)) {
+        moveSelectedBlocks(dx, dy);
+      } else {
+        const tBlock = textBlocks.find(b => b.id === blockId);
+        const iBlock = imageBlocks.find(b => b.id === blockId);
+        
+        if (tBlock) {
+          updateTextBlockPosition(blockId, tBlock.x + dx, tBlock.y + dy);
+        } else if (iBlock) {
+          updateImageBlockPosition(blockId, iBlock.x + dx, iBlock.y + dy);
+        }
       }
     }
   };
@@ -240,7 +256,7 @@ export const EditorCanvas: React.FC = () => {
               <DraggableText 
                 key={block.id} 
                 {...block} 
-                isSelected={selectedBlockId === block.id}
+                isSelected={selectedBlockIds.includes(block.id)}
                 zoom={zoom}
                 onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, block.id, 'text')}
               />
@@ -250,7 +266,7 @@ export const EditorCanvas: React.FC = () => {
               <DraggableImage 
                 key={block.id} 
                 {...block} 
-                isSelected={selectedBlockId === block.id}
+                isSelected={selectedBlockIds.includes(block.id)}
                 zoom={zoom}
                 onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, block.id, 'image')}
               />

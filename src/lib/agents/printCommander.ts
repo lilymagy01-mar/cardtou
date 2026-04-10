@@ -15,7 +15,9 @@ export interface PrintPageData {
     textAlign?: 'left' | 'center' | 'right',
     rotation?: number,
     textShadow?: string,
-    opacity?: number
+    opacity?: number,
+    strokeWidth?: number,
+    strokeColor?: string
   }[];
   imageBlocks?: {
     url: string | null,
@@ -144,7 +146,8 @@ export class PrintCommander {
           if (renderData.backgroundUrl) {
             try {
               const bgBytes = await fetch(renderData.backgroundUrl).then(res => res.arrayBuffer());
-              const bgImg = renderData.backgroundUrl.includes('png') 
+              const isPng = renderData.backgroundUrl.toLowerCase().includes('image/png') || renderData.backgroundUrl.toLowerCase().endsWith('.png');
+              const bgImg = isPng 
                 ? await pdfDoc.embedPng(bgBytes)
                 : await pdfDoc.embedJpg(bgBytes);
               
@@ -165,7 +168,8 @@ export class PrintCommander {
               if (imgBlock.url && imgBlock.isPrintable) {
                 try {
                   const imgBytes = await fetch(imgBlock.url).then(res => res.arrayBuffer());
-                  const img = imgBlock.url.includes('png') || imgBlock.url.includes('base64')
+                  const isPng = imgBlock.url.toLowerCase().includes('image/png') || imgBlock.url.toLowerCase().endsWith('.png');
+                  const img = isPng
                     ? await pdfDoc.embedPng(imgBytes)
                     : await pdfDoc.embedJpg(imgBytes);
                   
@@ -193,6 +197,8 @@ export class PrintCommander {
             const color = this.hexToRgb(block.colorHex);
             const font = getFont(block.fontFamily);
             const pdfFontSize = block.size * MM_TO_PT * 0.35;
+            const strokeWidth = block.strokeWidth || 0;
+            const strokeColor = this.hexToRgb(block.strokeColor || '#000000');
 
             let textLines = [block.text];
             if (isGrid && config) {
@@ -230,6 +236,30 @@ export class PrintCommander {
                 } catch { }
               }
 
+              // 테두리 구현 (8방향 겹쳐 그리기 기법)
+              if (strokeWidth > 0) {
+                const step = strokeWidth * 0.5; // 두께에 따른 미세 조정
+                const directions = [
+                  { dx: -step, dy: 0 }, { dx: step, dy: 0 },
+                  { dx: 0, dy: -step }, { dx: 0, dy: step },
+                  { dx: -step, dy: -step }, { dx: -step, dy: step },
+                  { dx: step, dy: -step }, { dx: step, dy: step }
+                ];
+                
+                directions.forEach(dir => {
+                  page.drawText(line || '', {
+                    x: pdfX + dir.dx,
+                    y: pdfY + dir.dy,
+                    size: pdfFontSize,
+                    font: font,
+                    color: rgb(strokeColor.r, strokeColor.g, strokeColor.b),
+                    opacity: block.opacity ?? 1,
+                    rotate: block.rotation ? degrees(block.rotation) : undefined
+                  });
+                });
+              }
+
+              // [철갑 도포 패치] 본체 텍스트를 한 번 더 겹쳐 그려서 하단 잔상의 겹침 선들을 완벽히 마스킹함
               page.drawText(line || '', {
                 x: pdfX,
                 y: pdfY,
@@ -239,6 +269,19 @@ export class PrintCommander {
                 opacity: block.opacity ?? 1,
                 rotate: block.rotation ? degrees(block.rotation) : undefined
               });
+              
+              // 두 번째 레이어 (미세한 안티앨리어싱 보정용)
+              if (strokeWidth > 0.5) {
+                page.drawText(line || '', {
+                  x: pdfX,
+                  y: pdfY,
+                  size: pdfFontSize,
+                  font: font,
+                  color: rgb(color.r, color.g, color.b),
+                  opacity: (block.opacity ?? 1) * 0.8,
+                  rotate: block.rotation ? degrees(block.rotation) : undefined
+                });
+              }
             });
           }
         }
@@ -253,13 +296,32 @@ export class PrintCommander {
   }
 
   static triggerPrintPopup(pdfBytes: Uint8Array) {
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
-    const printWindow = window.open(blobUrl);
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
-    }
+    
+    // Create a hidden iframe for direct printing
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.src = blobUrl;
+    
+    document.body.appendChild(iframe);
+    
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        
+        // Clean up after print dialog closes
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(blobUrl);
+        }, 1000);
+      }, 500);
+    };
   }
 }

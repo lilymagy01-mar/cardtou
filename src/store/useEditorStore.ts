@@ -17,6 +17,8 @@ export interface TextBlock {
   lineHeight?: number; // 줄 간격 (기본 1.0)
   rotation?: number; // 회전 (도)
   textShadow?: string; // CSS 텍스트 그림자 속성
+  strokeColor?: string; // 테두리 색상
+  strokeWidth?: number; // 테두리 두께
 }
 
 export interface ImageBlock {
@@ -78,6 +80,7 @@ interface EditorState {
   };
   
   selectedBlockId: string | null;
+  selectedBlockIds: string[]; // 다중 선택 지원
   designId: string | null;
   showFoldingGuide: boolean;
   
@@ -125,6 +128,10 @@ interface EditorState {
   removeImageBlock: (id: string) => void;
   
   setSelectedBlockId: (id: string | null) => void;
+  setSelectedBlockIds: (ids: string[]) => void;
+  toggleBlockSelection: (id: string) => void;
+  selectAll: () => void;
+  deselectAll: () => void;
   saveDesign: (category?: string) => Promise<void>;
   loadDesign: (id?: string) => Promise<void>;
   listDesigns: () => Promise<any[]>;
@@ -133,6 +140,7 @@ interface EditorState {
 
   updateShopSettings: (updates: Partial<ShopSettings>) => void;
   applyShopBranding: (target: 'front' | 'back') => void;
+  moveSelectedBlocks: (dx: number, dy: number) => void; // 다중 이동용
 }
 
 export const useEditorStore = create<EditorState>()(
@@ -150,7 +158,7 @@ export const useEditorStore = create<EditorState>()(
   backBackgroundUrl: null,
   textBlocks: [],
   imageBlocks: [],
-  margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  margins: { top: 5, right: 5, bottom: 5, left: 5 },
   pages: {
     outside: { 
       backgroundUrl: null, 
@@ -158,7 +166,7 @@ export const useEditorStore = create<EditorState>()(
       backBackgroundUrl: null, 
       textBlocks: [], 
       imageBlocks: [],
-      margins: { top: 10, right: 10, bottom: 10, left: 10 }
+      margins: { top: 5, right: 5, bottom: 5, left: 5 }
     },
     inside: { 
       backgroundUrl: null, 
@@ -166,7 +174,7 @@ export const useEditorStore = create<EditorState>()(
       backBackgroundUrl: null, 
       textBlocks: [], 
       imageBlocks: [],
-      margins: { top: 10, right: 10, bottom: 10, left: 10 }
+      margins: { top: 5, right: 5, bottom: 5, left: 5 }
     }
   },
   
@@ -179,6 +187,7 @@ export const useEditorStore = create<EditorState>()(
   },
 
   selectedBlockId: null,
+  selectedBlockIds: [],
   designId: null,
   showFoldingGuide: true,
   
@@ -227,7 +236,7 @@ export const useEditorStore = create<EditorState>()(
       backBackgroundUrl: targetData.backBackgroundUrl || state.backBackgroundUrl || null,
       textBlocks: targetData.textBlocks,
       imageBlocks: targetData.imageBlocks,
-      margins: targetData.margins || { top: 10, right: 10, bottom: 10, left: 10 },
+      margins: targetData.margins || { top: 5, right: 5, bottom: 5, left: 5 },
       selectedBlockId: null
     });
   },
@@ -239,10 +248,14 @@ export const useEditorStore = create<EditorState>()(
     const scaleY = dimension.heightMm / state.currentDimension.heightMm;
     const scaleFont = Math.min(scaleX, scaleY);
 
-    const isLandscape = dimension.widthMm > dimension.heightMm;
+    // [정밀 여백] 폼텍 라벨지는 5mm + 단면(None), 일반 카드는 5mm(사용자요청) + 반절(Half)
+    const isLabel = presetId.startsWith('formtec-');
+    const newMargins = { top: 5, right: 5, bottom: 5, left: 5 }; // 전체 5mm로 통일 (사용자 요청)
+    const newFoldType: FoldType = isLabel ? 'none' : 'half';
 
     const scaleTextBlocks = (blocks: TextBlock[]) => blocks.map(b => {
       let rotation = b.rotation || 0;
+      const isLandscape = dimension.widthMm > dimension.heightMm;
       if (isLandscape && rotation === 180) rotation = 0;
       return {
         ...b,
@@ -256,6 +269,7 @@ export const useEditorStore = create<EditorState>()(
 
     const scaleImageBlocks = (blocks: ImageBlock[]) => blocks.map(b => {
       let rotation = b.rotation || 0;
+      const isLandscape = dimension.widthMm > dimension.heightMm;
       if (isLandscape && rotation === 180) rotation = 0;
       return {
         ...b,
@@ -270,11 +284,13 @@ export const useEditorStore = create<EditorState>()(
     const updatedPages = {
       outside: {
         ...state.pages.outside,
+        margins: newMargins, // 여백 업데이트
         textBlocks: scaleTextBlocks(state.pages.outside.textBlocks),
         imageBlocks: scaleImageBlocks(state.pages.outside.imageBlocks)
       },
       inside: {
         ...state.pages.inside,
+        margins: newMargins, // 여백 업데이트
         textBlocks: scaleTextBlocks(state.pages.inside.textBlocks),
         imageBlocks: scaleImageBlocks(state.pages.inside.imageBlocks)
       }
@@ -283,6 +299,8 @@ export const useEditorStore = create<EditorState>()(
     return { 
       currentDimension: dimension, 
       selectedPresetId: presetId,
+      foldType: newFoldType,
+      margins: newMargins, // 현재 표시되는 여백도 업데이트
       textBlocks: scaleTextBlocks(state.textBlocks),
       imageBlocks: scaleImageBlocks(state.imageBlocks),
       pages: updatedPages
@@ -372,9 +390,18 @@ export const useEditorStore = create<EditorState>()(
       if (state.orientation === 'landscape' && rotation === 180) {
         rotation = 0;
       }
+      
+      // Calculate max zIndex to ensure new block is on top
+      const maxZ = Math.max(
+        0,
+        ...state.textBlocks.map(b => b.zIndex || 0),
+        ...state.imageBlocks.map(b => b.zIndex || 0)
+      );
+
       return {
-        textBlocks: [...state.textBlocks, { ...block, id: newId, rotation }],
+        textBlocks: [...state.textBlocks, { ...block, id: newId, rotation, zIndex: maxZ + 1 }],
         selectedBlockId: newId,
+        selectedBlockIds: [newId]
       };
     });
     return newId;
@@ -503,9 +530,17 @@ export const useEditorStore = create<EditorState>()(
       if (state.orientation === 'landscape' && rotation === 180) {
         rotation = 0;
       }
+
+      const maxZ = Math.max(
+        0,
+        ...state.textBlocks.map(b => b.zIndex || 0),
+        ...state.imageBlocks.map(b => b.zIndex || 0)
+      );
+
       return {
-        imageBlocks: [...state.imageBlocks, { ...block, id: newId, rotation }],
+        imageBlocks: [...state.imageBlocks, { ...block, id: newId, rotation, zIndex: maxZ + 1 }],
         selectedBlockId: newId,
+        selectedBlockIds: [newId]
       };
     });
     return newId;
@@ -580,7 +615,56 @@ export const useEditorStore = create<EditorState>()(
     selectedBlockId: state.selectedBlockId === id ? null : state.selectedBlockId
   })),
 
-  setSelectedBlockId: (id) => set({ selectedBlockId: id }),
+  setSelectedBlockId: (id) => set({ selectedBlockId: id, selectedBlockIds: id ? [id] : [] }),
+  setSelectedBlockIds: (ids) => set({ selectedBlockIds: ids, selectedBlockId: ids.length === 1 ? ids[0] : null }),
+  toggleBlockSelection: (id) => set((state) => {
+    const isSelected = state.selectedBlockIds.includes(id);
+    const newIds = isSelected 
+      ? state.selectedBlockIds.filter(bid => bid !== id)
+      : [...state.selectedBlockIds, id];
+    return {
+      selectedBlockIds: newIds,
+      selectedBlockId: newIds.length === 1 ? newIds[0] : null
+    };
+  }),
+  selectAll: () => set((state) => {
+    const allIds = [
+      ...state.textBlocks.map(b => b.id),
+      ...state.imageBlocks.map(b => b.id)
+    ];
+    return {
+      selectedBlockIds: allIds,
+      selectedBlockId: allIds.length === 1 ? allIds[0] : null
+    };
+  }),
+  deselectAll: () => set({ selectedBlockId: null, selectedBlockIds: [] }),
+
+  moveSelectedBlocks: (dx, dy) => set((state) => {
+    if (state.selectedBlockIds.length === 0) return {};
+    
+    const newTextBlocks = [...state.textBlocks];
+    const newImageBlocks = [...state.imageBlocks];
+    
+    state.selectedBlockIds.forEach(id => {
+      // 텍스트 블록 이동
+      const tIdx = newTextBlocks.findIndex(b => b.id === id);
+      if (tIdx > -1) {
+        const b = newTextBlocks[tIdx];
+        newTextBlocks[tIdx] = { ...b, x: b.x + dx, y: b.y + dy };
+      }
+      // 이미지 블록 이동
+      const iIdx = newImageBlocks.findIndex(b => b.id === id);
+      if (iIdx > -1) {
+        const b = newImageBlocks[iIdx];
+        newImageBlocks[iIdx] = { ...b, x: b.x + dx, y: b.y + dy };
+      }
+    });
+    
+    return {
+      textBlocks: newTextBlocks,
+      imageBlocks: newImageBlocks
+    };
+  }),
 
   saveDesign: async (category?: string) => {
     const state = get();

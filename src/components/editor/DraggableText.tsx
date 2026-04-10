@@ -13,7 +13,7 @@ interface DraggableTextProps extends TextBlock {
 
 export const DraggableText: React.FC<DraggableTextProps> = (props) => {
   const { id, text, x, y, fontSize, colorHex, fontFamily, textAlign, zIndex, isSelected, zoom, rotation, textShadow } = props;
-  const { setSelectedBlockId, removeTextBlock } = useEditorStore();
+  const { setSelectedBlockId, toggleBlockSelection, removeTextBlock } = useEditorStore();
 
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: id,
@@ -31,25 +31,29 @@ export const DraggableText: React.FC<DraggableTextProps> = (props) => {
     top: `${top}px`,
     transform: transform
       ? `translate3d(${transform.x}px, ${transform.y}px, 0) rotate(${rotation || 0}deg)`
-      : `translate(-50%, -50%) rotate(${rotation || 0}deg)`, // Center align and rotate
-    zIndex: zIndex || 10,
+      : `rotate(${rotation || 0}deg)`, // Top-left origin for precise dragging
     textAlign: textAlign || 'left',
     color: colorHex,
     fontSize: `${fontSize * (zoom / 3)}px`, // Match the mm scaling (3px per mm)
     fontFamily: fontFamily || 'sans-serif',
     textShadow: textShadow,
+    WebkitTextStroke: props.strokeWidth ? `${props.strokeWidth}px ${props.strokeColor || '#000'}` : 'none',
+    paintOrder: 'stroke fill', // [중요] 테두리를 먼저 그려서 글자 내부가 겹쳐 보이지 않게 함
     whiteSpace: 'pre-wrap',
     cursor: props.isLocked ? 'default' : 'grab',
     userSelect: 'none',
     opacity: props.opacity ?? 1,
-    padding: '4px',
+    padding: `${8 * (zoom / 3)}px`, // Larger padding for easier grabbing
     border: transform ? `${2 * (zoom / 3)}px dashed #3b82f6` : (isSelected ? `${2 * (zoom / 3)}px solid #3b82f6` : '1px solid transparent'),
+    borderRadius: '4px',
     width: props.width ? `${props.width * zoom}px` : 'max-content',
     lineHeight: props.lineHeight ?? 1.6,
     wordBreak: 'keep-all',
     minWidth: '20px',
     boxSizing: 'border-box',
     transition: 'opacity 0.2s ease',
+    // Ensure selected text is always on top for easier movement
+    zIndex: isSelected ? 999 : (zIndex || 10), 
   };
 
   const uiScale = Math.max(0.6, Math.min(1.5, zoom / 3));
@@ -63,7 +67,11 @@ export const DraggableText: React.FC<DraggableTextProps> = (props) => {
       onContextMenu={props.onContextMenu}
       onClick={(e) => {
         e.stopPropagation();
-        setSelectedBlockId(id);
+        if (e.shiftKey) {
+          toggleBlockSelection(id);
+        } else {
+          setSelectedBlockId(id);
+        }
       }}
       className={transform ? 'bg-white/50 rounded z-50 shadow-lg' : 'hover:border-blue-300 rounded z-10'}
     >
